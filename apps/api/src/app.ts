@@ -25,7 +25,7 @@ const tracer = trace.getTracer('orbit-api');
 
 const registerObservability = (app: FastifyInstance): void => {
   const spans = new WeakMap<FastifyRequest, Span>();
-  app.addHook('onRequest', (request) => {
+  app.addHook('onRequest', (request, _reply, done) => {
     const span = tracer.startSpan(`${request.method} ${request.routeOptions.url ?? request.url}`, {
       attributes: {
         'http.request.method': request.method,
@@ -34,6 +34,7 @@ const registerObservability = (app: FastifyInstance): void => {
       },
     });
     spans.set(request, span);
+    done();
   });
   app.addHook('onResponse', async (request, reply) => {
     const span = spans.get(request);

@@ -146,6 +146,27 @@ describe.runIf(enabled)('ORBIT API integration', () => {
     const tokenA = tokensA.accessToken;
     const tokenB = tokensB.accessToken;
 
+    const missingAccessToken = await app.inject({ method: 'GET', url: '/v1/brief/today' });
+    expect(missingAccessToken.statusCode).toBe(401);
+    const invalidAccessToken = await app.inject({
+      method: 'GET',
+      url: '/v1/brief/today',
+      headers: { authorization: 'Bearer invalid-access-token' },
+    });
+    expect(invalidAccessToken.statusCode).toBe(401);
+    const invalidRefreshToken = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/refresh',
+      payload: { refreshToken: 'invalid-refresh-token' },
+    });
+    expect(invalidRefreshToken.statusCode).toBe(401);
+    const forbiddenAdminRoute = await app.inject({
+      method: 'GET',
+      url: '/v1/admin/costs',
+      headers: { authorization: `Bearer ${tokenA}` },
+    });
+    expect(forbiddenAdminRoute.statusCode).toBe(403);
+
     const refreshed = await app.inject({
       method: 'POST',
       url: '/v1/auth/refresh',
