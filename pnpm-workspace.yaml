@@ -1,0 +1,46 @@
+packages:
+  - apps/*
+  - packages/*
+
+overrides:
+  'decode-uri-component@<=0.4.2': 0.5.0
+  'deepmerge-ts@<8.0.0': 8.0.2
+  'mysql2@<3.22.0': 3.24.5
+  'uuid@<11.1.1': 11.1.1
+
+allowBuilds:
+  '@google/genai': true
+  '@prisma/engines': true
+  esbuild: true
+  msgpackr-extract: true
+  prisma: true
+  protobufjs: true
+
+minimumReleaseAgeExclude:
+  - '@anthropic-ai/sdk@0.129.0'
+  - '@typescript-eslint/eslint-plugin@8.71.0'
+  - '@typescript-eslint/parser@8.71.0'
+  - '@typescript-eslint/project-service@8.71.0'
+  - '@typescript-eslint/scope-manager@8.71.0'
+  - '@typescript-eslint/tsconfig-utils@8.71.0'
+  - '@typescript-eslint/type-utils@8.71.0'
+  - '@typescript-eslint/types@8.71.0'
+  - '@typescript-eslint/typescript-estree@8.71.0'
+  - '@typescript-eslint/utils@8.71.0'
+  - '@typescript-eslint/visitor-keys@8.71.0'
+  - typescript-eslint@8.71.0
+  - '@types/ws@8.18.2'
+  - bullmq@6.3.10
+  - '@expo/ui@57.0.21'
+  - expo-constants@57.0.20
+  - expo-document-picker@57.0.3
+  - expo-modules-core@57.0.20
+  - expo-router@57.0.24
+  - expo@57.0.26
+  - mysql2@3.24.5
+
+onlyBuiltDependencies:
+  - '@prisma/engines'
+  - prisma
+  - esbuild
+  - msgpackr-extract
