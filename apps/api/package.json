@@ -1,0 +1,45 @@
+{
+  "name": "@orbit/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/src/server.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src tests --max-warnings=0",
+    "test": "vitest run --exclude 'dist/**'",
+    "test:integration": "vitest run tests/integration --exclude 'dist/**'",
+    "test:coverage": "vitest run --coverage --exclude 'dist/**'",
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/src/server.js"
+  },
+  "dependencies": {
+    "@fastify/cors": "11.3.0",
+    "@fastify/helmet": "13.1.1",
+    "@fastify/multipart": "10.1.2",
+    "@fastify/rate-limit": "11.2.0",
+    "@fastify/sensible": "6.0.6",
+    "@fastify/websocket": "11.3.1",
+    "@orbit/agent": "workspace:*",
+    "@orbit/db": "workspace:*",
+    "@orbit/llm": "workspace:*",
+    "@orbit/shared": "workspace:*",
+    "@opentelemetry/api": "1.9.1",
+    "adm-zip": "0.6.1",
+    "archiver": "8.0.0",
+    "fastify": "5.12.5",
+    "jose": "6.2.12",
+    "ws": "8.22.0",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/adm-zip": "0.5.8",
+    "@types/archiver": "8.0.0",
+    "@types/supertest": "7.2.1",
+    "@types/ws": "8.18.2",
+    "@vitest/coverage-v8": "5.0.2",
+    "supertest": "7.3.0",
+    "tsx": "4.23.15"
+  }
+}
