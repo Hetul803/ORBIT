@@ -1,0 +1,40 @@
+{
+  "expo": {
+    "name": "ORBIT",
+    "slug": "orbit",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "orbit",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.orbit.companion"
+    },
+    "android": {
+      "package": "com.orbit.companion",
+      "adaptiveIcon": {
+        "backgroundColor": "#F6F2E9"
+      }
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-document-picker",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#F6F2E9"
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    }
+  }
+}

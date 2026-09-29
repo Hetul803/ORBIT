@@ -1,0 +1,20 @@
+appId: com.orbit.companion
+---
+- launchApp:
+    clearState: true
+- assertVisible: 'A second self that gets better at being useful.'
+- tapOn:
+    id: 'email-input'
+- eraseText
+- inputText: 'demo@orbit.local'
+- tapOn:
+    id: 'request-code'
+- assertVisible: 'Verify it’s you'
+- assertVisible: 'Local development'
+- tapOn:
+    id: 'verify-code'
+- assertVisible: 'Name your agent'
+- tapOn: 'I already have an agent'
+- tapOn: 'Finish with this foundation'
+- assertVisible: 'Good morning.'
+- assertVisible: 'WHILE YOU WERE AWAY'

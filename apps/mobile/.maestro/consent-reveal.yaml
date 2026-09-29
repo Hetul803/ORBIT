@@ -1,0 +1,9 @@
+appId: com.orbit.companion
+---
+- launchApp
+- tapOn: 'Circle'
+- tapOn: 'The same calm pace, with enough difference to stay interesting.'
+- assertVisible: 'REDACTED AGENT TRANSCRIPT'
+- assertVisible: 'Reveal only what you choose'
+- tapOn: 'Reveal if they reveal'
+- assertVisible: 'Mutual reveal'
