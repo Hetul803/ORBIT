@@ -1,0 +1,989 @@
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "esm"
+  importFileExtension = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserStatus {
+  ACTIVE
+  PENDING_DELETION
+  SUSPENDED
+}
+
+enum UserRole {
+  USER
+  MODERATOR
+  ADMIN
+}
+
+enum MemoryKind {
+  TRAIT
+  PREFERENCE
+  GOAL
+  CONSTRAINT
+  PERSON
+  EVENT
+  VOICE
+}
+
+enum MemorySource {
+  INTERVIEW
+  IMPORT
+  CORRECTION
+  OUTCOME
+}
+
+enum IntentKind {
+  DATING
+  FRIENDSHIP
+  ROOMMATE
+  COFOUNDER
+  STUDY_PARTNER
+  GYM_PARTNER
+  MENTOR
+  HIRING
+  EXCHANGE
+}
+
+enum ExchangeDirection {
+  HAVE
+  WANT
+}
+
+enum Urgency {
+  LOW
+  NORMAL
+  HIGH
+}
+
+enum MatchStatus {
+  PENDING
+  CONVERSED
+  SKIPPED
+}
+
+enum ConversationStatus {
+  RUNNING
+  COMPLETED
+  ENDED_EARLY
+  REDACTION_FAILED
+  MODERATION_FLAGGED
+}
+
+enum RevealDecision {
+  PENDING
+  REVEAL
+  DECLINE
+}
+
+enum InboxTriage {
+  AUTO_DECLINED
+  HELD
+  ESCALATED
+  ANSWERED
+}
+
+enum ScreeningAction {
+  ALLOW
+  HOLD
+  DECLINE
+}
+
+enum RunStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  PAUSED_COST_CAP
+}
+
+enum SkillStatus {
+  DRAFT
+  VALIDATING
+  ACTIVE
+  PAUSED
+  RETIRED
+}
+
+enum GroupKind {
+  CAMPUS
+  CLUB
+  LAB
+  CLASS
+}
+
+enum GroupVisibility {
+  PRIVATE
+  DOMAIN
+  PUBLIC
+}
+
+enum GroupRole {
+  MEMBER
+  ADMIN
+  OWNER
+}
+
+enum ConnectionProvider {
+  GOOGLE
+  MICROSOFT
+  IMAP
+  S3
+}
+
+enum ConnectionStatus {
+  ACTIVE
+  EXPIRED
+  REVOKED
+  ERROR
+}
+
+enum ActorType {
+  USER
+  AGENT
+  SYSTEM
+  ADMIN
+}
+
+enum ReportStatus {
+  OPEN
+  REVIEWING
+  RESOLVED
+  DISMISSED
+}
+
+enum Platform {
+  IOS
+  ANDROID
+  WEB
+}
+
+model User {
+  id                    String                @id @default(cuid())
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+  deletedAt             DateTime?
+  email                 String                @unique
+  emailVerifiedAt       DateTime?
+  eduVerifiedAt         DateTime?
+  phone                 String?               @unique
+  phoneVerifiedAt       DateTime?
+  dateOfBirth           DateTime
+  ageVerifiedAt         DateTime?
+  displayName           String
+  handle                String?               @unique
+  campusId              String?
+  locale                String                @default("en-US")
+  timezone              String                @default("America/Chicago")
+  status                UserStatus            @default(ACTIVE)
+  role                  UserRole              @default(USER)
+  deletionRequestedAt   DateTime?
+  lastActiveAt          DateTime               @default(now())
+  campus                Group?                @relation("CampusUsers", fields: [campusId], references: [id], onDelete: SetNull)
+  agent                 Agent?
+  intents               Intent[]
+  exchangeItems         ExchangeItem[]
+  introductionOutcomes  IntroductionOutcome[]
+  reveals               Reveal[]
+  inboxReceived         InboxItem[]            @relation("InboxRecipient")
+  inboxSent             InboxItem[]            @relation("InboxSenderUser")
+  screeningRules        ScreeningRule[]
+  watchers              Watcher[]
+  runs                  Run[]
+  ownedSkills           Skill[]                @relation("SkillOwner")
+  skillAdoptions        SkillAdoption[]
+  memberships           GroupMember[]
+  connections           Connection[]
+  activity              ActivityLog[]
+  modelCalls            ModelCall[]
+  blocksCreated         Block[]                @relation("Blocker")
+  blocksReceived        Block[]                @relation("Blocked")
+  mutesCreated          Mute[]                 @relation("Muter")
+  mutesReceived         Mute[]                 @relation("Muted")
+  reportsCreated        Report[]               @relation("Reporter")
+  reportsReceived       Report[]               @relation("ReportSubject")
+  safetyPlans           SafetyPlan[]
+  devices               Device[]
+  consents              Consent[]
+  dailyBriefs           DailyBrief[]
+  otpChallenges         OtpChallenge[]
+  refreshTokens         RefreshToken[]
+  apiKeys               EncryptedApiKey[]
+  introductionsAsA      Introduction[]         @relation("IntroductionUserA")
+  introductionsAsB      Introduction[]         @relation("IntroductionUserB")
+  moderationActions     ModerationAction[]      @relation("Moderator")
+
+  @@index([campusId])
+  @@index([status, deletionRequestedAt])
+  @@index([lastActiveAt])
+}
+
+model Agent {
+  id                    String              @id @default(cuid())
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+  deletedAt             DateTime?
+  userId                String              @unique
+  name                  String
+  identitySeed          String              @unique
+  voiceProfile          Json                @default("{}")
+  autonomyDefaults      Json                @default("{}")
+  profileSummary        String              @default("")
+  profileEmbedding      Unsupported("vector(1536)")?
+  lastConsolidatedAt    DateTime?
+  user                  User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  memoryFacts           MemoryFact[]
+  matchCandidatesAsA    MatchCandidate[]    @relation("MatchAgentA")
+  matchCandidatesAsB    MatchCandidate[]    @relation("MatchAgentB")
+  conversationsAsA      AgentConversation[] @relation("ConversationAgentA")
+  conversationsAsB      AgentConversation[] @relation("ConversationAgentB")
+  messages              AgentMessage[]
+  sentInboxItems        InboxItem[]          @relation("InboxSenderAgent")
+
+  @@index([userId])
+}
+
+model MemoryFact {
+  id              String       @id @default(cuid())
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  deletedAt       DateTime?
+  agentId         String
+  kind            MemoryKind
+  content         String
+  confidence      Float
+  source          MemorySource
+  embedding       Unsupported("vector(1536)")?
+  embeddingHash   String?
+  supersededById  String?
+  userEditedAt    DateTime?
+  agent           Agent        @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  supersededBy    MemoryFact?  @relation("FactSupersession", fields: [supersededById], references: [id], onDelete: SetNull)
+  supersedes      MemoryFact[] @relation("FactSupersession")
+
+  @@index([agentId])
+  @@index([kind])
+  @@index([supersededById])
+  @@index([deletedAt])
+}
+
+model Intent {
+  id          String     @id @default(cuid())
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  deletedAt   DateTime?
+  userId      String
+  kind        IntentKind
+  active      Boolean    @default(false)
+  params      Json       @default("{}")
+  pausedUntil DateTime?
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, kind])
+  @@index([userId])
+  @@index([kind, active, pausedUntil])
+}
+
+model ExchangeItem {
+  id             String            @id @default(cuid())
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  deletedAt      DateTime?
+  userId         String
+  direction      ExchangeDirection
+  title          String
+  category       String
+  condition      String?
+  description    String
+  priceLowCents  Int?
+  priceHighCents Int?
+  willTradeFor   String?
+  urgency        Urgency           @default(NORMAL)
+  active         Boolean           @default(true)
+  user           User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  proposalsAsHave ExchangeProposal[] @relation("ProposalHave")
+  proposalsAsWant ExchangeProposal[] @relation("ProposalWant")
+
+  @@index([userId])
+  @@index([direction, category, active])
+  @@index([urgency])
+}
+
+model ExchangeProposal {
+  id             String         @id @default(cuid())
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  deletedAt      DateTime?
+  haveItemId     String
+  wantItemId     String
+  conversationId String?
+  terms          Json
+  userADecision  RevealDecision @default(PENDING)
+  userBDecision  RevealDecision @default(PENDING)
+  acceptedAt     DateTime?
+  expiresAt      DateTime
+  haveItem       ExchangeItem   @relation("ProposalHave", fields: [haveItemId], references: [id], onDelete: Restrict)
+  wantItem       ExchangeItem   @relation("ProposalWant", fields: [wantItemId], references: [id], onDelete: Restrict)
+
+  @@unique([haveItemId, wantItemId])
+  @@index([haveItemId])
+  @@index([wantItemId])
+  @@index([acceptedAt])
+  @@index([expiresAt])
+}
+
+model MatchCandidate {
+  id             String      @id @default(cuid())
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  deletedAt      DateTime?
+  intentKind     IntentKind
+  agentAId       String
+  agentBId       String
+  retrievalScore Float
+  rerankScore    Float?
+  status         MatchStatus @default(PENDING)
+  reason         String
+  agentA         Agent       @relation("MatchAgentA", fields: [agentAId], references: [id], onDelete: Cascade)
+  agentB         Agent       @relation("MatchAgentB", fields: [agentBId], references: [id], onDelete: Cascade)
+
+  @@unique([intentKind, agentAId, agentBId])
+  @@index([agentAId])
+  @@index([agentBId])
+  @@index([intentKind, status])
+  @@index([rerankScore])
+}
+
+model AgentConversation {
+  id              String             @id @default(cuid())
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  deletedAt       DateTime?
+  intentKind      IntentKind
+  agentAId        String
+  agentBId        String
+  status          ConversationStatus @default(RUNNING)
+  turnCount       Int                @default(0)
+  verdict         Json?
+  redactionPassed Boolean            @default(false)
+  startedAt       DateTime           @default(now())
+  endedAt         DateTime?
+  agentA           Agent              @relation("ConversationAgentA", fields: [agentAId], references: [id], onDelete: Restrict)
+  agentB           Agent              @relation("ConversationAgentB", fields: [agentBId], references: [id], onDelete: Restrict)
+  messages         AgentMessage[]
+  introduction     Introduction?
+  modelCalls       ModelCall[]
+  reports          Report[]
+
+  @@index([agentAId])
+  @@index([agentBId])
+  @@index([intentKind, status])
+  @@index([redactionPassed])
+}
+
+model AgentMessage {
+  id                  String            @id @default(cuid())
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  deletedAt           DateTime?
+  conversationId      String
+  speakerAgentId      String
+  turnIndex           Int
+  contentHash         String
+  redactedContent     String
+  tokensIn            Int               @default(0)
+  tokensOut           Int               @default(0)
+  conversation        AgentConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  speakerAgent        Agent             @relation(fields: [speakerAgentId], references: [id], onDelete: Restrict)
+
+  @@unique([conversationId, turnIndex])
+  @@index([conversationId])
+  @@index([speakerAgentId])
+}
+
+model Introduction {
+  id             String         @id @default(cuid())
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  deletedAt      DateTime?
+  conversationId String         @unique
+  userAId        String
+  userBId        String
+  userADecision  RevealDecision @default(PENDING)
+  userBDecision  RevealDecision @default(PENDING)
+  decidedAAt     DateTime?
+  decidedBAt     DateTime?
+  revealedAt     DateTime?
+  revealedFields Json           @default("{}")
+  expiresAt      DateTime
+  conversation   AgentConversation @relation(fields: [conversationId], references: [id], onDelete: Restrict)
+  userA          User           @relation("IntroductionUserA", fields: [userAId], references: [id], onDelete: Restrict)
+  userB          User           @relation("IntroductionUserB", fields: [userBId], references: [id], onDelete: Restrict)
+  outcomes       IntroductionOutcome[]
+  reveals        Reveal[]
+  safetyPlans    SafetyPlan[]
+
+  @@index([userAId])
+  @@index([userBId])
+  @@index([expiresAt])
+  @@index([revealedAt])
+}
+
+model IntroductionOutcome {
+  id             String       @id @default(cuid())
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  deletedAt      DateTime?
+  introductionId String
+  userId         String
+  met            Boolean
+  rating         Int?
+  notes          String?
+  reportedAt     DateTime     @default(now())
+  introduction   Introduction @relation(fields: [introductionId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([introductionId, userId])
+  @@index([introductionId])
+  @@index([userId])
+  @@index([met, rating])
+}
+
+model Reveal {
+  id             String       @id @default(cuid())
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  deletedAt      DateTime?
+  introductionId String
+  userId         String
+  field          String
+  value          String
+  consentedAt    DateTime     @default(now())
+  introduction   Introduction @relation(fields: [introductionId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([introductionId, userId, field])
+  @@index([introductionId])
+  @@index([userId])
+}
+
+model InboxItem {
+  id              String      @id @default(cuid())
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  deletedAt       DateTime?
+  recipientUserId String
+  senderAgentId   String?
+  senderUserId    String?
+  kind            String
+  subject         String
+  body            String
+  triage          InboxTriage
+  agentReply      String?
+  approvedAt      DateTime?
+  declinedAt      DateTime?
+  recipient       User        @relation("InboxRecipient", fields: [recipientUserId], references: [id], onDelete: Cascade)
+  senderAgent     Agent?      @relation("InboxSenderAgent", fields: [senderAgentId], references: [id], onDelete: SetNull)
+  senderUser      User?       @relation("InboxSenderUser", fields: [senderUserId], references: [id], onDelete: SetNull)
+
+  @@index([recipientUserId, triage])
+  @@index([senderAgentId])
+  @@index([senderUserId])
+}
+
+model ScreeningRule {
+  id        String          @id @default(cuid())
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  deletedAt DateTime?
+  userId    String
+  matchOn   Json
+  action    ScreeningAction
+  priority  Int
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, priority])
+  @@index([action])
+}
+
+model Watcher {
+  id        String       @id @default(cuid())
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  deletedAt DateTime?
+  userId    String
+  title     String
+  spec      Json
+  schedule  String
+  active    Boolean      @default(true)
+  lastRunAt DateTime?
+  nextRunAt DateTime?
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  hits      WatcherHit[]
+
+  @@index([userId])
+  @@index([active, nextRunAt])
+}
+
+model WatcherHit {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+  watcherId String
+  payload   Json
+  dedupeKey String
+  seenAt    DateTime?
+  watcher   Watcher  @relation(fields: [watcherId], references: [id], onDelete: Cascade)
+
+  @@unique([watcherId, dedupeKey])
+  @@index([watcherId, seenAt])
+}
+
+model Run {
+  id          String    @id @default(cuid())
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+  userId      String
+  kind        String
+  skillId     String?
+  status      RunStatus @default(QUEUED)
+  steps       Json      @default("[]")
+  costCents   Decimal   @default(0) @db.Decimal(12, 6)
+  durationMs  Int       @default(0)
+  startedAt   DateTime?
+  endedAt     DateTime?
+  parentRunId String?
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  skill       Skill?    @relation(fields: [skillId], references: [id], onDelete: SetNull)
+  parentRun   Run?      @relation("RunLineage", fields: [parentRunId], references: [id], onDelete: SetNull)
+  childRuns   Run[]     @relation("RunLineage")
+  modelCalls  ModelCall[]
+  receipts    LearningReceipt[]
+
+  @@index([userId, createdAt])
+  @@index([skillId, createdAt])
+  @@index([status])
+  @@index([parentRunId])
+}
+
+model Skill {
+  id                String       @id @default(cuid())
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  deletedAt         DateTime?
+  ownerUserId       String
+  groupId           String?
+  name              String
+  version           Int          @default(1)
+  definition        Json
+  compiledPlan      Json?
+  autonomyPct       Int          @default(0)
+  confidence        Float        @default(0)
+  adoptionCount     Int          @default(0)
+  runCount          Int          @default(0)
+  successCount      Int          @default(0)
+  status            SkillStatus  @default(DRAFT)
+  parentSkillId     String?
+  owner             User         @relation("SkillOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  group             Group?       @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  parentSkill       Skill?       @relation("SkillLineage", fields: [parentSkillId], references: [id], onDelete: SetNull)
+  childSkills       Skill[]      @relation("SkillLineage")
+  adoptions         SkillAdoption[]
+  runs              Run[]
+  versions          SkillVersion[]
+  dependencies      SkillDependency[] @relation("SkillDependencyParent")
+  usedBy            SkillDependency[] @relation("SkillDependencyChild")
+  receipts          LearningReceipt[]
+
+  @@index([ownerUserId])
+  @@index([groupId])
+  @@index([status])
+  @@index([parentSkillId])
+  @@index([adoptionCount])
+}
+
+model SkillVersion {
+  id            String   @id @default(cuid())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  deletedAt     DateTime?
+  skillId       String
+  version       Int
+  definition    Json
+  confidence    Float
+  evidence      Json
+  correction    String?
+  validation    Json
+  skill         Skill    @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@unique([skillId, version])
+  @@index([skillId])
+}
+
+model SkillDependency {
+  id            String   @id @default(cuid())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  deletedAt     DateTime?
+  parentSkillId String
+  childSkillId  String
+  reuseCount    Int      @default(0)
+  parentSkill   Skill    @relation("SkillDependencyParent", fields: [parentSkillId], references: [id], onDelete: Cascade)
+  childSkill    Skill    @relation("SkillDependencyChild", fields: [childSkillId], references: [id], onDelete: Cascade)
+
+  @@unique([parentSkillId, childSkillId])
+  @@index([parentSkillId])
+  @@index([childSkillId])
+}
+
+model LearningReceipt {
+  id                   String   @id @default(cuid())
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  deletedAt            DateTime?
+  skillId              String
+  runId                String
+  headline             String
+  reusableSteps        Int
+  firstRunActions      Int
+  currentRunActions    Int
+  firstRunModelCalls   Int
+  currentRunModelCalls Int
+  confidence           Float
+  fallbackUsed         Boolean
+  skill                Skill    @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  run                  Run      @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([skillId, runId])
+  @@index([skillId])
+  @@index([runId])
+}
+
+model SkillAdoption {
+  id                String   @id @default(cuid())
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  deletedAt         DateTime?
+  skillId           String
+  userId            String
+  adaptedDefinition Json
+  adoptedAt         DateTime @default(now())
+  skill             Skill    @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([skillId, userId])
+  @@index([skillId])
+  @@index([userId])
+}
+
+model Group {
+  id          String          @id @default(cuid())
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  deletedAt   DateTime?
+  kind        GroupKind
+  name        String
+  joinCode    String          @unique
+  emailDomain String?
+  visibility  GroupVisibility @default(PRIVATE)
+  members     GroupMember[]
+  skills      Skill[]
+  campusUsers User[]          @relation("CampusUsers")
+
+  @@index([emailDomain])
+  @@index([kind, visibility])
+}
+
+model GroupMember {
+  id        String    @id @default(cuid())
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+  groupId   String
+  userId    String
+  role      GroupRole @default(MEMBER)
+  joinedAt  DateTime  @default(now())
+  group     Group     @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, userId])
+  @@index([groupId])
+  @@index([userId])
+}
+
+model Connection {
+  id              String             @id @default(cuid())
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  deletedAt       DateTime?
+  userId          String
+  provider        ConnectionProvider
+  scopes          String[]
+  encryptedTokens String
+  status          ConnectionStatus   @default(ACTIVE)
+  lastSyncedAt    DateTime?
+  user            User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider])
+  @@index([userId])
+  @@index([status])
+}
+
+model ActivityLog {
+  id         String    @id @default(cuid())
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @default(now())
+  userId     String
+  actorType  ActorType
+  action     String
+  targetType String
+  targetId   String?
+  payload    Json      @default("{}")
+  requestId  String?
+  user       User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([userId, createdAt])
+  @@index([targetType, targetId])
+  @@index([action])
+  @@index([requestId])
+}
+
+model ModelCall {
+  id             String             @id @default(cuid())
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  deletedAt      DateTime?
+  userId         String
+  runId          String?
+  conversationId String?
+  task           String
+  provider       String
+  model          String
+  tokensIn       Int
+  tokensOut      Int
+  costCents      Decimal            @db.Decimal(12, 6)
+  latencyMs      Int
+  requestId      String?
+  user           User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  run            Run?               @relation(fields: [runId], references: [id], onDelete: SetNull)
+  conversation   AgentConversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([runId])
+  @@index([conversationId])
+  @@index([task, createdAt])
+  @@index([requestId])
+}
+
+model Block {
+  id            String   @id @default(cuid())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  deletedAt     DateTime?
+  blockerUserId String
+  blockedUserId String
+  reason        String
+  blocker       User     @relation("Blocker", fields: [blockerUserId], references: [id], onDelete: Cascade)
+  blocked       User     @relation("Blocked", fields: [blockedUserId], references: [id], onDelete: Cascade)
+
+  @@unique([blockerUserId, blockedUserId])
+  @@index([blockerUserId])
+  @@index([blockedUserId])
+}
+
+model Mute {
+  id          String   @id @default(cuid())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  muterUserId String
+  mutedUserId String
+  reason      String?
+  expiresAt   DateTime?
+  muter       User     @relation("Muter", fields: [muterUserId], references: [id], onDelete: Cascade)
+  muted       User     @relation("Muted", fields: [mutedUserId], references: [id], onDelete: Cascade)
+
+  @@unique([muterUserId, mutedUserId])
+  @@index([muterUserId])
+  @@index([mutedUserId])
+  @@index([expiresAt])
+}
+
+model Report {
+  id             String             @id @default(cuid())
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  deletedAt      DateTime?
+  reporterUserId String
+  subjectUserId  String
+  conversationId String?
+  category       String
+  detail         String
+  status         ReportStatus       @default(OPEN)
+  resolvedBy     String?
+  reporter       User               @relation("Reporter", fields: [reporterUserId], references: [id], onDelete: Restrict)
+  subject        User               @relation("ReportSubject", fields: [subjectUserId], references: [id], onDelete: Restrict)
+  conversation   AgentConversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  actions        ModerationAction[]
+
+  @@index([reporterUserId])
+  @@index([subjectUserId])
+  @@index([conversationId])
+  @@index([status, createdAt])
+}
+
+model ModerationAction {
+  id          String   @id @default(cuid())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now())
+  reportId    String
+  moderatorId String
+  action      String
+  reason      String
+  report      Report   @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  moderator   User     @relation("Moderator", fields: [moderatorId], references: [id], onDelete: Restrict)
+
+  @@index([reportId])
+  @@index([moderatorId])
+}
+
+model SafetyPlan {
+  id                String       @id @default(cuid())
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  deletedAt         DateTime?
+  introductionId    String
+  userId            String
+  placeName         String
+  meetAt            DateTime
+  shareToken        String       @unique
+  sharedWithContact Boolean      @default(false)
+  checkInDueAt      DateTime
+  checkedInAt       DateTime?
+  introduction      Introduction @relation(fields: [introductionId], references: [id], onDelete: Cascade)
+  user              User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([introductionId])
+  @@index([userId])
+  @@index([checkInDueAt, checkedInAt])
+}
+
+model Device {
+  id         String   @id @default(cuid())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  deletedAt  DateTime?
+  userId     String
+  pushToken  String   @unique
+  platform   Platform
+  lastSeenAt DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([platform])
+}
+
+model Consent {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+  userId    String
+  kind      String
+  version   String
+  grantedAt DateTime @default(now())
+  revokedAt DateTime?
+  metadata  Json     @default("{}")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, kind])
+  @@index([kind, version])
+}
+
+model DailyBrief {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+  userId    String
+  forDate   DateTime @db.Date
+  payload   Json
+  openedAt  DateTime?
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, forDate])
+  @@index([userId, forDate])
+}
+
+model OtpChallenge {
+  id         String   @id @default(cuid())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  deletedAt  DateTime?
+  userId     String?
+  email      String
+  codeHash   String
+  purpose    String
+  expiresAt  DateTime
+  consumedAt DateTime?
+  attempts   Int      @default(0)
+  ipHash     String?
+  user       User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([email, purpose, expiresAt])
+  @@index([userId])
+}
+
+model RefreshToken {
+  id         String   @id @default(cuid())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  deletedAt  DateTime?
+  userId     String
+  tokenHash  String   @unique
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  replacedBy String?
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model EncryptedApiKey {
+  id             String   @id @default(cuid())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  deletedAt      DateTime?
+  userId         String
+  provider       String
+  encryptedValue String
+  keyHint        String
+  lastUsedAt     DateTime?
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider])
+  @@index([userId])
+}
+
+model AgeGateAttempt {
+  id          String   @id @default(cuid())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  emailHash   String
+  birthDate   DateTime @db.Date
+  allowed     Boolean
+  ipHash      String?
+  userAgent   String?
+
+  @@index([emailHash, createdAt])
+  @@index([allowed, createdAt])
+}
