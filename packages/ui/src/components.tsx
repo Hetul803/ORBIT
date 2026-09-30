@@ -188,7 +188,7 @@ export const Icon = ({
     strokeLinejoin: 'round' as const,
   };
   return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" accessibilityElementsHidden>
+    <Svg width={size} height={size} viewBox="0 0 24 24" aria-hidden>
       {name === 'sun' && (
         <>
           <Circle cx="12" cy="12" r="4" {...common} />

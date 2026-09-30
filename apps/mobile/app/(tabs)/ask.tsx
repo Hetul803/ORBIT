@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import { useState, type ReactNode } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { Button, Card, OrbitText, Pill, Screen, spacing } from '@orbit/ui';
@@ -18,13 +19,62 @@ export default function Ask(): ReactNode {
   const [result, setResult] = useState<AskResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
   const submit = async (): Promise<void> => {
     setBusy(true);
     setError(null);
+    setActionMessage(null);
     try {
       setResult(await api<AskResult>('/v1/ask/interpret', jsonBody({ input: prompt })));
     } catch (caught: unknown) {
       setError(caught instanceof Error ? caught.message : 'Your agent could not answer.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const approve = async (): Promise<void> => {
+    if (result === null) return;
+    setError(null);
+    if (result.kind === 'watcher') {
+      router.push({ pathname: '/watcher/new', params: { input: prompt } });
+      return;
+    }
+    if (result.kind === 'exchange') {
+      router.push({
+        pathname: '/exchange/new',
+        params: {
+          description: prompt,
+          direction: result.structured.direction === 'have' ? 'have' : 'want',
+        },
+      });
+      return;
+    }
+    if (result.kind === 'agent_question') {
+      router.push('/memory');
+      return;
+    }
+    if (result.kind === 'task') {
+      router.push('/connections');
+      return;
+    }
+    const intentKind =
+      typeof result.structured.intentKind === 'string'
+        ? result.structured.intentKind
+        : 'friendship';
+    const active = result.structured.active !== false;
+    setBusy(true);
+    try {
+      await api(`/v1/intents/${intentKind}`, {
+        method: 'PUT',
+        body: JSON.stringify({ active, params: { source: 'ask', request: prompt } }),
+      });
+      setActionMessage(
+        `${intentKind.replaceAll('_', ' ')} matching is now ${active ? 'active' : 'paused'}.`,
+      );
+    } catch (caught: unknown) {
+      setError(
+        caught instanceof Error ? caught.message : 'The approved action could not be saved.',
+      );
     } finally {
       setBusy(false);
     }
@@ -71,9 +121,12 @@ export default function Ask(): ReactNode {
           <OrbitText variant="title">{result.summary}</OrbitText>
           <OrbitText>{JSON.stringify(result.structured, null, 2)}</OrbitText>
           {result.requiresApproval ? (
-            <Button label="Review proposed action" onPress={() => undefined} />
+            <Button label="Review proposed action" onPress={() => void approve()} loading={busy} />
           ) : null}
         </Card>
+      )}
+      {actionMessage === null ? null : (
+        <Notice title="Approved" detail={actionMessage} tone="moss" />
       )}
       {error === null ? null : <ErrorText message={error} />}
     </Screen>

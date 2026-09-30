@@ -647,6 +647,21 @@ export const registerWorkRoutes = (app: FastifyInstance, services: Services): vo
           : /what do you know|remember about me|my agent/u.test(input)
             ? 'agent_question'
             : 'task';
+    const intentKind = input.includes('roommate')
+      ? 'roommate'
+      : input.includes('cofounder')
+        ? 'cofounder'
+        : input.includes('study')
+          ? 'study_partner'
+          : input.includes('gym')
+            ? 'gym_partner'
+            : input.includes('mentor')
+              ? 'mentor'
+              : input.includes('hiring') || input.includes('hire')
+                ? 'hiring'
+                : input.includes('dating') || input.includes('date')
+                  ? 'dating'
+                  : 'friendship';
     const structured =
       kind === 'watcher'
         ? parseWatcherSpec(body.input)
@@ -655,7 +670,9 @@ export const registerWorkRoutes = (app: FastifyInstance, services: Services): vo
               description: body.input,
               direction: /I have|selling|offering/iu.test(body.input) ? 'have' : 'want',
             }
-          : { input: body.input };
+          : kind === 'intent'
+            ? { input: body.input, intentKind, active: !/pause|turn off|stop/u.test(input) }
+            : { input: body.input };
     return {
       kind,
       confidence: 0.86,

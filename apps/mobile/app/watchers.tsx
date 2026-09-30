@@ -38,6 +38,11 @@ export default function Watchers(): ReactNode {
               ? 'not scheduled'
               : new Date(watcher.nextRunAt).toLocaleString()}
           </OrbitText>
+          <Button
+            label="Open watcher"
+            onPress={() => router.push({ pathname: '/watcher/[id]', params: { id: watcher.id } })}
+            kind="secondary"
+          />
         </Card>
       ))}
       <Button label="Back" onPress={() => router.back()} kind="secondary" />

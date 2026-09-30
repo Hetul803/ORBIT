@@ -1,5 +1,6 @@
 import { ConversationStatus, createPrismaClient, IntentKind, type PrismaClient } from '@orbit/db';
 import { configFromEnvironment, CostCapError, ModelRouter, StubProvider } from '@orbit/llm';
+import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -21,8 +22,15 @@ const config = loadConfig({
 });
 
 describe.runIf(enabled)('ORBIT API integration', () => {
+  const testRunId = randomUUID().slice(0, 8);
+  const consentAEmail = `consent-a-${testRunId}@orbit.local`;
+  const consentBEmail = `consent-b-${testRunId}@orbit.local`;
+  const testPhone = `+1312${String(Number.parseInt(testRunId.slice(0, 6), 16))
+    .padStart(7, '0')
+    .slice(-7)}`;
   let db: PrismaClient;
   let app: FastifyInstance;
+  let testIpCounter = 10;
 
   beforeAll(async () => {
     db = createPrismaClient();
@@ -40,10 +48,13 @@ describe.runIf(enabled)('ORBIT API integration', () => {
     displayName: string,
     exerciseInvalidCode = false,
   ): Promise<{ accessToken: string; refreshToken: string }> => {
+    testIpCounter += 1;
+    const remoteAddress = `127.0.0.${String(testIpCounter)}`;
     const requested = await app.inject({
       method: 'POST',
       url: '/v1/auth/otp/request',
       payload: { email },
+      remoteAddress,
     });
     expect(requested.statusCode).toBe(200);
     const code = requested.json<{ developmentCode: string }>().developmentCode;
@@ -57,6 +68,7 @@ describe.runIf(enabled)('ORBIT API integration', () => {
           dateOfBirth: '1999-01-01',
           displayName,
         },
+        remoteAddress,
       });
       expect(invalid.statusCode).toBe(401);
     }
@@ -64,10 +76,27 @@ describe.runIf(enabled)('ORBIT API integration', () => {
       method: 'POST',
       url: '/v1/auth/otp/verify',
       payload: { email, code, dateOfBirth: '1999-01-01', displayName },
+      remoteAddress,
     });
     expect(verified.statusCode).toBe(200);
     return verified.json<{ accessToken: string; refreshToken: string }>();
   };
+
+  it('allows browser preflights for every mutation method used by the app', async () => {
+    for (const method of ['PUT', 'PATCH', 'DELETE']) {
+      const response = await app.inject({
+        method: 'OPTIONS',
+        url: '/v1/intents/roommate',
+        headers: {
+          origin: 'http://localhost:8081',
+          'access-control-request-method': method,
+          'access-control-request-headers': 'authorization,content-type',
+        },
+      });
+      expect(response.statusCode).toBe(204);
+      expect(response.headers['access-control-allow-methods']).toContain(method);
+    }
+  });
 
   it('hard-blocks a user below 18 and records the age gate attempt', async () => {
     const email = 'underage-test@orbit.local';
@@ -112,26 +141,87 @@ describe.runIf(enabled)('ORBIT API integration', () => {
   });
 
   it('reveals only mutually consented fields and never exposes raw messages', async () => {
-    const { accessToken } = await signIn('demo@orbit.local', 'Demo Founder');
+    const tokensA = await signIn(`reveal-a-${testRunId}@orbit.local`, 'Reveal Alpha');
+    const tokensB = await signIn(`reveal-b-${testRunId}@orbit.local`, 'Reveal Beta');
+    const [userA, userB, seedConversation] = await Promise.all([
+      db.user.findUniqueOrThrow({ where: { email: `reveal-a-${testRunId}@orbit.local` } }),
+      db.user.findUniqueOrThrow({ where: { email: `reveal-b-${testRunId}@orbit.local` } }),
+      db.agentConversation.findUniqueOrThrow({ where: { id: 'seed-conversation-01' } }),
+    ]);
+    const [agentA, agentB] = await Promise.all([
+      db.agent.create({
+        data: {
+          userId: userA.id,
+          name: 'Reveal Alpha Agent',
+          identitySeed: `integration-reveal-alpha-${testRunId}`,
+        },
+      }),
+      db.agent.create({
+        data: {
+          userId: userB.id,
+          name: 'Reveal Beta Agent',
+          identitySeed: `integration-reveal-beta-${testRunId}`,
+        },
+      }),
+    ]);
+    const conversationId = `integration-reveal-conversation-${testRunId}`;
+    const introductionId = `integration-reveal-introduction-${testRunId}`;
+    await db.agentConversation.create({
+      data: {
+        id: conversationId,
+        intentKind: IntentKind.FRIENDSHIP,
+        agentAId: agentA.id,
+        agentBId: agentB.id,
+        status: ConversationStatus.COMPLETED,
+        turnCount: 1,
+        verdict: seedConversation.verdict ?? {},
+        redactionPassed: true,
+        endedAt: new Date(),
+        messages: {
+          create: {
+            id: `integration-reveal-message-${testRunId}`,
+            speakerAgentId: agentA.id,
+            turnIndex: 0,
+            contentHash: createHash('sha256').update('Safe redacted message.').digest('hex'),
+            redactedContent: 'Safe redacted message.',
+          },
+        },
+        introduction: {
+          create: {
+            id: introductionId,
+            userAId: userA.id,
+            userBId: userB.id,
+            expiresAt: new Date(Date.now() + 86_400_000),
+          },
+        },
+      },
+    });
+    const otherDecision = await app.inject({
+      method: 'POST',
+      url: `/v1/introductions/${introductionId}/decision`,
+      headers: { authorization: `Bearer ${tokensB.accessToken}` },
+      payload: { decision: 'reveal', fields: ['first_name'] },
+    });
+    expect(otherDecision.statusCode).toBe(200);
     const decision = await app.inject({
       method: 'POST',
-      url: '/v1/introductions/seed-introduction-01/decision',
-      headers: { authorization: `Bearer ${accessToken}` },
+      url: `/v1/introductions/${introductionId}/decision`,
+      headers: { authorization: `Bearer ${tokensA.accessToken}` },
       payload: { decision: 'reveal', fields: ['first_name', 'phone'] },
     });
     expect(decision.statusCode).toBe(200);
     const body = decision.json<{
       revealedAt: string;
-      revealedFields: { userA: Record<string, string>; userB: Record<string, string> };
+      revealedFields: { you: Record<string, string>; other: Record<string, string> };
     }>();
     expect(body.revealedAt).toBeTruthy();
-    expect(Object.keys(body.revealedFields.userA)).toEqual(['first_name']);
-    expect(Object.keys(body.revealedFields.userB)).toEqual(['first_name']);
+    expect(Object.keys(body.revealedFields.you)).toEqual(['first_name']);
+    expect(Object.keys(body.revealedFields.other)).toEqual(['first_name']);
 
     const transcript = await app.inject({
       method: 'GET',
-      url: '/v1/introductions/seed-introduction-01/transcript',
-      headers: { authorization: `Bearer ${accessToken}` },
+      url: `/v1/introductions/${introductionId}/transcript`,
+      headers: { authorization: `Bearer ${tokensA.accessToken}` },
     });
     expect(transcript.statusCode).toBe(200);
     const serialized = transcript.body;
@@ -141,8 +231,8 @@ describe.runIf(enabled)('ORBIT API integration', () => {
   });
 
   it('requires two independent reveal decisions and hides a failed-redaction introduction', async () => {
-    const tokensA = await signIn('consent-a@orbit.local', 'Ada North', true);
-    const tokensB = await signIn('consent-b@orbit.local', 'Bela South');
+    const tokensA = await signIn(consentAEmail, 'Ada North', true);
+    const tokensB = await signIn(consentBEmail, 'Bela South');
     const tokenA = tokensA.accessToken;
     const tokenB = tokensB.accessToken;
 
@@ -179,7 +269,7 @@ describe.runIf(enabled)('ORBIT API integration', () => {
       method: 'POST',
       url: '/v1/auth/verify-edu/request',
       headers: { authorization: `Bearer ${tokenA}` },
-      payload: { email: 'ada@northstar.edu' },
+      payload: { email: `ada-${testRunId}@northstar.edu` },
     });
     expect(eduRequest.statusCode).toBe(200);
     const eduVerify = await app.inject({
@@ -187,7 +277,7 @@ describe.runIf(enabled)('ORBIT API integration', () => {
       url: '/v1/auth/verify-edu',
       headers: { authorization: `Bearer ${tokenA}` },
       payload: {
-        email: 'ada@northstar.edu',
+        email: `ada-${testRunId}@northstar.edu`,
         code: eduRequest.json<{ developmentCode: string }>().developmentCode,
       },
     });
@@ -197,7 +287,7 @@ describe.runIf(enabled)('ORBIT API integration', () => {
       method: 'POST',
       url: '/v1/auth/verify-phone/request',
       headers: { authorization: `Bearer ${tokenA}` },
-      payload: { phone: '+13125550177' },
+      payload: { phone: testPhone },
     });
     expect(phoneRequest.statusCode).toBe(200);
     const phoneVerify = await app.inject({
@@ -205,14 +295,14 @@ describe.runIf(enabled)('ORBIT API integration', () => {
       url: '/v1/auth/verify-phone',
       headers: { authorization: `Bearer ${tokenA}` },
       payload: {
-        phone: '+13125550177',
+        phone: testPhone,
         code: phoneRequest.json<{ developmentCode: string }>().developmentCode,
       },
     });
     expect(phoneVerify.statusCode).toBe(200);
     const [userA, userB, seedConversation] = await Promise.all([
-      db.user.findUniqueOrThrow({ where: { email: 'consent-a@orbit.local' } }),
-      db.user.findUniqueOrThrow({ where: { email: 'consent-b@orbit.local' } }),
+      db.user.findUniqueOrThrow({ where: { email: consentAEmail } }),
+      db.user.findUniqueOrThrow({ where: { email: consentBEmail } }),
       db.agentConversation.findUniqueOrThrow({ where: { id: 'seed-conversation-01' } }),
     ]);
     const [agentA, agentB] = await Promise.all([
@@ -220,20 +310,20 @@ describe.runIf(enabled)('ORBIT API integration', () => {
         data: {
           userId: userA.id,
           name: 'Northstar',
-          identitySeed: 'integration-agent-consent-a',
+          identitySeed: `integration-agent-consent-a-${testRunId}`,
         },
       }),
       db.agent.create({
         data: {
           userId: userB.id,
           name: 'Southstar',
-          identitySeed: 'integration-agent-consent-b',
+          identitySeed: `integration-agent-consent-b-${testRunId}`,
         },
       }),
     ]);
     const conversation = await db.agentConversation.create({
       data: {
-        id: 'integration-conversation-consent',
+        id: `integration-conversation-consent-${testRunId}`,
         intentKind: IntentKind.FRIENDSHIP,
         agentAId: agentA.id,
         agentBId: agentB.id,
@@ -246,7 +336,7 @@ describe.runIf(enabled)('ORBIT API integration', () => {
     });
     await db.introduction.create({
       data: {
-        id: 'integration-introduction-consent',
+        id: `integration-introduction-consent-${testRunId}`,
         conversationId: conversation.id,
         userAId: userA.id,
         userBId: userB.id,
@@ -256,7 +346,7 @@ describe.runIf(enabled)('ORBIT API integration', () => {
 
     const firstDecision = await app.inject({
       method: 'POST',
-      url: '/v1/introductions/integration-introduction-consent/decision',
+      url: `/v1/introductions/integration-introduction-consent-${testRunId}/decision`,
       headers: { authorization: `Bearer ${tokenA}` },
       payload: { decision: 'reveal', fields: ['first_name'] },
     });
@@ -267,7 +357,7 @@ describe.runIf(enabled)('ORBIT API integration', () => {
 
     const secondDecision = await app.inject({
       method: 'POST',
-      url: '/v1/introductions/integration-introduction-consent/decision',
+      url: `/v1/introductions/integration-introduction-consent-${testRunId}/decision`,
       headers: { authorization: `Bearer ${tokenB}` },
       payload: { decision: 'reveal', fields: ['first_name'] },
     });
@@ -276,7 +366,7 @@ describe.runIf(enabled)('ORBIT API integration', () => {
 
     const unsafeConversation = await db.agentConversation.create({
       data: {
-        id: 'integration-conversation-redaction-failed',
+        id: `integration-conversation-redaction-failed-${testRunId}`,
         intentKind: IntentKind.FRIENDSHIP,
         agentAId: agentA.id,
         agentBId: agentB.id,
@@ -288,7 +378,7 @@ describe.runIf(enabled)('ORBIT API integration', () => {
     });
     await db.introduction.create({
       data: {
-        id: 'integration-introduction-redaction-failed',
+        id: `integration-introduction-redaction-failed-${testRunId}`,
         conversationId: unsafeConversation.id,
         userAId: userA.id,
         userBId: userB.id,
@@ -297,7 +387,7 @@ describe.runIf(enabled)('ORBIT API integration', () => {
     });
     const hidden = await app.inject({
       method: 'GET',
-      url: '/v1/introductions/integration-introduction-redaction-failed',
+      url: `/v1/introductions/integration-introduction-redaction-failed-${testRunId}`,
       headers: { authorization: `Bearer ${tokenA}` },
     });
     expect(hidden.statusCode).toBe(404);
@@ -306,11 +396,11 @@ describe.runIf(enabled)('ORBIT API integration', () => {
       url: '/v1/introductions',
       headers: { authorization: `Bearer ${tokenA}` },
     });
-    expect(list.body).not.toContain('integration-introduction-redaction-failed');
+    expect(list.body).not.toContain(`integration-introduction-redaction-failed-${testRunId}`);
   });
 
   it('enforces a cost cap from the real database ledger before provider execution', async () => {
-    const user = await db.user.findUniqueOrThrow({ where: { email: 'consent-a@orbit.local' } });
+    const user = await db.user.findUniqueOrThrow({ where: { email: consentAEmail } });
     await db.modelCall.create({
       data: {
         userId: user.id,

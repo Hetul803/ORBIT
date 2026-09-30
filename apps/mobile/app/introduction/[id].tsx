@@ -5,7 +5,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { Button, Card, colors, OrbitText, Pill, Screen, spacing } from '@orbit/ui';
 
 import { api, jsonBody } from '@/api';
-import { AppHeader, ErrorText, Notice } from '@/components';
+import { AppHeader, ErrorText, Field, Notice } from '@/components';
 
 interface IntroductionDetail {
   id: string;
@@ -23,7 +23,7 @@ interface IntroductionDetail {
   myDecision: 'pending' | 'reveal' | 'decline';
   otherDecision: 'pending' | 'reveal';
   revealedAt: string | null;
-  revealedFields: Record<string, string>;
+  revealedFields: Record<'you' | 'other', Record<string, string>> | Record<string, never>;
   expiresAt: string;
 }
 
@@ -50,6 +50,11 @@ export default function IntroductionScreen(): ReactNode {
   const id = params.id;
   const client = useQueryClient();
   const [fields, setFields] = useState<('first_name' | 'handle' | 'phone')[]>(['first_name']);
+  const [showOutcome, setShowOutcome] = useState(false);
+  const [met, setMet] = useState<boolean | null>(null);
+  const [rating, setRating] = useState<number | null>(null);
+  const [notes, setNotes] = useState('');
+  const [outcomeSaved, setOutcomeSaved] = useState(false);
   const detail = useQuery({
     queryKey: ['introduction', id],
     queryFn: () => api<IntroductionDetail>(`/v1/introductions/${id}`),
@@ -78,6 +83,21 @@ export default function IntroductionScreen(): ReactNode {
     onSuccess: (value) => {
       client.setQueryData(['introduction', id], value);
       void client.invalidateQueries({ queryKey: ['introductions'] });
+    },
+  });
+  const outcome = useMutation({
+    mutationFn: () =>
+      api(
+        `/v1/introductions/${id}/outcome`,
+        jsonBody({
+          met: met === true,
+          ...(rating === null ? {} : { rating }),
+          ...(notes.trim().length === 0 ? {} : { notes: notes.trim() }),
+        }),
+      ),
+    onSuccess: () => {
+      setOutcomeSaved(true);
+      setShowOutcome(false);
     },
   });
   const intro = detail.data;
@@ -177,15 +197,62 @@ export default function IntroductionScreen(): ReactNode {
       ) : (
         <Card tone="moss">
           <OrbitText variant="title">Mutual reveal</OrbitText>
-          {Object.entries(intro.revealedFields).map(([field, value]) => (
-            <OrbitText key={field}>
-              {field.replaceAll('_', ' ')}: {value}
-            </OrbitText>
+          {Object.entries(intro.revealedFields).map(([owner, revealed]) => (
+            <View key={owner} style={styles.revealedProfile}>
+              <OrbitText variant="label">
+                {owner === 'you' ? 'Your profile' : intro.otherAgent.name}
+              </OrbitText>
+              {Object.entries(revealed).map(([field, value]) => (
+                <OrbitText key={field}>
+                  {field.replaceAll('_', ' ')}: {value}
+                </OrbitText>
+              ))}
+            </View>
           ))}
-          <Button label="Record how it went" onPress={() => undefined} kind="secondary" />
+          {outcomeSaved ? (
+            <Notice
+              title="Outcome recorded"
+              detail="Your private feedback will improve future ranking without exposing it to the other person."
+              tone="moss"
+            />
+          ) : showOutcome ? (
+            <View style={styles.outcome}>
+              <OrbitText variant="label">Did you meet?</OrbitText>
+              <View style={styles.choices}>
+                <Choice selected={met === true} label="Yes" onPress={() => setMet(true)} />
+                <Choice selected={met === false} label="Not yet" onPress={() => setMet(false)} />
+              </View>
+              <OrbitText variant="label">How useful was the introduction?</OrbitText>
+              <View style={styles.choices}>
+                {[1, 2, 3, 4, 5].map((value) => (
+                  <Choice
+                    key={value}
+                    selected={rating === value}
+                    label={String(value)}
+                    onPress={() => setRating(value)}
+                  />
+                ))}
+              </View>
+              <Field label="Private notes" value={notes} onChangeText={setNotes} multiline />
+              <Button
+                label="Save outcome"
+                onPress={() => outcome.mutate()}
+                loading={outcome.isPending}
+                disabled={met === null}
+              />
+              <Button label="Cancel" onPress={() => setShowOutcome(false)} kind="quiet" />
+            </View>
+          ) : (
+            <Button
+              label="Record how it went"
+              onPress={() => setShowOutcome(true)}
+              kind="secondary"
+            />
+          )}
         </Card>
       )}
       {decision.error === null ? null : <ErrorText message={decision.error.message} />}
+      {outcome.error === null ? null : <ErrorText message={outcome.error.message} />}
       <Button
         label="Safety controls"
         onPress={() =>
@@ -231,4 +298,6 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
   },
   choiceSelected: { borderColor: colors.ember, backgroundColor: colors.emberLight },
+  outcome: { gap: spacing.md },
+  revealedProfile: { gap: spacing.xs },
 });

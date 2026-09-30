@@ -267,7 +267,7 @@ const buildBriefs = async (db: PrismaClient): Promise<void> => {
         durationMs: 0,
         autonomy: 0.62,
         needsUser: true,
-        href: `/introductions/${intro.id}`,
+        href: `/introduction/${intro.id}`,
       })),
       ...hits.map((hit) => ({
         id: hit.id,
@@ -278,7 +278,7 @@ const buildBriefs = async (db: PrismaClient): Promise<void> => {
         durationMs: 0,
         autonomy: 0.95,
         needsUser: false,
-        href: `/watchers/${hit.watcherId}`,
+        href: `/watcher/${hit.watcherId}`,
       })),
       ...runs.slice(0, 4).map((run) => ({
         id: run.id,
@@ -289,7 +289,7 @@ const buildBriefs = async (db: PrismaClient): Promise<void> => {
         durationMs: run.durationMs,
         autonomy: 0.7,
         needsUser: false,
-        href: `/runs/${run.id}`,
+        href: `/run/${run.id}`,
       })),
     ];
     await db.dailyBrief.upsert({

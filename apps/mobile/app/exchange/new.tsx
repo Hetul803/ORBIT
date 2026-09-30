@@ -1,4 +1,4 @@
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useState, type ReactNode } from 'react';
 import { Button, Card, Screen } from '@orbit/ui';
 
@@ -6,9 +6,12 @@ import { api, jsonBody } from '@/api';
 import { AppHeader, ErrorText, Field, Notice } from '@/components';
 
 export default function NewExchangeItem(): ReactNode {
-  const [direction, setDirection] = useState<'have' | 'want'>('want');
+  const params = useLocalSearchParams<{ description?: string; direction?: string }>();
+  const [direction, setDirection] = useState<'have' | 'want'>(
+    params.direction === 'have' ? 'have' : 'want',
+  );
   const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
+  const [description, setDescription] = useState(params.description ?? '');
   const [category, setCategory] = useState('other');
   const [error, setError] = useState<string | null>(null);
   const save = async (): Promise<void> => {

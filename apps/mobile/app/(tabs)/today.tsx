@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { router } from 'expo-router';
+import { router, type Href } from 'expo-router';
 import { useState, type ReactNode } from 'react';
 import { Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 import {
@@ -22,7 +22,7 @@ import type { BriefItem, DailyBrief } from '@/types';
 
 const BriefCard = ({ item }: { item: BriefItem }): ReactNode => (
   <Pressable
-    onPress={() => router.push(item.href)}
+    onPress={() => router.push(item.href as Href)}
     style={({ pressed }) => pressed && styles.pressed}
   >
     <Card tone={item.needsUser ? 'ember' : item.kind === 'watcher_hit' ? 'blue' : 'paper'}>

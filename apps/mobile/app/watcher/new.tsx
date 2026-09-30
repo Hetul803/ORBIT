@@ -1,4 +1,4 @@
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useState, type ReactNode } from 'react';
 import { Button, Card, OrbitText, Screen } from '@orbit/ui';
 
@@ -18,8 +18,9 @@ interface Interpretation {
 }
 
 export default function NewWatcher(): ReactNode {
+  const params = useLocalSearchParams<{ input?: string }>();
   const [input, setInput] = useState(
-    'Let me know when a quiet sublet under $900 appears in ORBIT.',
+    params.input ?? 'Let me know when a quiet sublet under $900 appears in ORBIT.',
   );
   const [interpretation, setInterpretation] = useState<Interpretation | null>(null);
   const [busy, setBusy] = useState(false);

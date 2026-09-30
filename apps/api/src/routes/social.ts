@@ -21,6 +21,17 @@ const decisionToApi = (value: RevealDecision): 'pending' | 'reveal' | 'decline' 
 
 const intentToApi = (value: IntentKind): string => value.toLowerCase();
 
+const revealedFieldsForUser = (
+  value: unknown,
+  isA: boolean,
+): { you: Record<string, unknown>; other: Record<string, unknown> } => {
+  const raw = asRecord(value);
+  return {
+    you: asRecord(raw[isA ? 'userA' : 'userB']),
+    other: asRecord(raw[isA ? 'userB' : 'userA']),
+  };
+};
+
 const userRevealValue = (
   field: RevealField,
   user: { displayName: string; handle: string | null; phone: string | null },
@@ -66,7 +77,8 @@ const introductionDto = (record: IntroductionRecord, userId: string): Record<str
     myDecision: decisionToApi(myDecision),
     otherDecision,
     revealedAt: iso(record.revealedAt),
-    revealedFields: record.revealedAt === null ? {} : asRecord(record.revealedFields),
+    revealedFields:
+      record.revealedAt === null ? {} : revealedFieldsForUser(record.revealedFields, isA),
     expiresAt: record.expiresAt.toISOString(),
   };
 };

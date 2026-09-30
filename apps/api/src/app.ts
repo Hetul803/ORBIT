@@ -102,6 +102,7 @@ export const buildApp = async (db: PrismaClient, config: ApiConfig): Promise<Fas
       callback(allowed ? null : new Error('Origin is not allowed'), allowed);
     },
     credentials: false,
+    methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   });
   await app.register(rateLimit, {
     max: 180,
