@@ -24,7 +24,12 @@ const isAdult = (birthDate: Date, now = new Date()): boolean => {
 };
 
 const deliverEmailOtp = async (services: Services, email: string, code: string): Promise<void> => {
-  if (services.config.OTP_DELIVERY_MODE === 'log') return;
+  if (services.config.OTP_DELIVERY_MODE === 'log') {
+    if (services.config.NODE_ENV === 'production') {
+      throw new ApiError(503, 'OTP_PROVIDER_UNAVAILABLE', 'Email delivery is not configured.');
+    }
+    return;
+  }
   if (services.config.RESEND_API_KEY === undefined) {
     throw new ApiError(503, 'OTP_PROVIDER_UNAVAILABLE', 'Email delivery is not configured.');
   }
@@ -43,6 +48,39 @@ const deliverEmailOtp = async (services: Services, email: string, code: string):
   });
   if (!response.ok)
     throw new ApiError(502, 'OTP_DELIVERY_FAILED', 'The sign-in code could not be delivered.');
+};
+
+const deliverPhoneOtp = async (services: Services, phone: string, code: string): Promise<void> => {
+  if (services.config.PHONE_OTP_PROVIDER === 'log') {
+    if (services.config.NODE_ENV === 'production') {
+      throw new ApiError(503, 'SMS_PROVIDER_UNAVAILABLE', 'SMS delivery is not configured.');
+    }
+    return;
+  }
+  const accountSid = services.config.TWILIO_ACCOUNT_SID;
+  const authToken = services.config.TWILIO_AUTH_TOKEN;
+  const from = services.config.TWILIO_FROM_PHONE;
+  if (accountSid === undefined || authToken === undefined || from === undefined) {
+    throw new ApiError(503, 'SMS_PROVIDER_UNAVAILABLE', 'Twilio SMS delivery is not configured.');
+  }
+  const response = await fetch(
+    `https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(accountSid)}/Messages.json`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString('base64')}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        To: phone,
+        From: from,
+        Body: `Your ORBIT verification code is ${code}. It expires in ${String(Math.ceil(services.config.OTP_TTL_SECONDS / 60))} minutes.`,
+      }),
+      signal: AbortSignal.timeout(10_000),
+    },
+  );
+  if (!response.ok)
+    throw new ApiError(502, 'SMS_DELIVERY_FAILED', 'The SMS code could not be delivered.');
 };
 
 export const registerAuthRoutes = (app: FastifyInstance, services: Services): void => {
@@ -67,7 +105,9 @@ export const registerAuthRoutes = (app: FastifyInstance, services: Services): vo
       return {
         ok: true,
         expiresIn: services.config.OTP_TTL_SECONDS,
-        ...(services.config.NODE_ENV !== 'production' && services.config.OTP_DELIVERY_MODE === 'log'
+        ...(services.config.NODE_ENV !== 'production' &&
+        services.config.OTP_DELIVERY_MODE === 'log' &&
+        services.config.ALLOW_DEVELOPMENT_OTP_DISPLAY === 'true'
           ? { developmentCode: code }
           : {}),
       };
@@ -186,7 +226,9 @@ export const registerAuthRoutes = (app: FastifyInstance, services: Services): vo
       return {
         ok: true,
         expiresIn: services.config.OTP_TTL_SECONDS,
-        ...(services.config.NODE_ENV !== 'production' && services.config.OTP_DELIVERY_MODE === 'log'
+        ...(services.config.NODE_ENV !== 'production' &&
+        services.config.OTP_DELIVERY_MODE === 'log' &&
+        services.config.ALLOW_DEVELOPMENT_OTP_DISPLAY === 'true'
           ? { developmentCode: code }
           : {}),
       };
@@ -234,10 +276,16 @@ export const registerAuthRoutes = (app: FastifyInstance, services: Services): vo
           ipHash: sha256(request.ip),
         },
       });
-      if (services.config.NODE_ENV === 'production') {
-        throw new ApiError(503, 'SMS_PROVIDER_UNAVAILABLE', 'SMS delivery is not configured yet.');
-      }
-      return { ok: true, expiresIn: services.config.OTP_TTL_SECONDS, developmentCode: code };
+      await deliverPhoneOtp(services, body.phone, code);
+      return {
+        ok: true,
+        expiresIn: services.config.OTP_TTL_SECONDS,
+        ...(services.config.NODE_ENV !== 'production' &&
+        services.config.PHONE_OTP_PROVIDER === 'log' &&
+        services.config.ALLOW_DEVELOPMENT_OTP_DISPLAY === 'true'
+          ? { developmentCode: code }
+          : {}),
+      };
     },
   });
 

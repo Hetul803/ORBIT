@@ -1,7 +1,7 @@
 import { router } from 'expo-router';
 import { useState, type ReactNode } from 'react';
-import { StyleSheet, View } from 'react-native';
-import { Button, Card, OrbitText, Pill, Screen, spacing } from '@orbit/ui';
+import { Pressable, StyleSheet, View } from 'react-native';
+import { Button, Card, OrbitText, Pill, Ring, Screen, spacing } from '@orbit/ui';
 
 import { api, jsonBody } from '@/api';
 import { AppHeader, ErrorText, Field, Notice } from '@/components';
@@ -86,6 +86,15 @@ export default function Ask(): ReactNode {
         subtitle="Search your approved memory and tools without sending a broad prompt into the world."
       />
       <Card tone="ember">
+        <View style={styles.askIdentity}>
+          <Ring
+            value={busy ? 0.35 : result === null ? 0 : result.confidence}
+            tone="rented"
+            size={52}
+            seed={prompt || 'ask'}
+          />
+          <OrbitText variant="mono">ASK / PRIVATE CONTEXT</OrbitText>
+        </View>
         <Field
           label="What do you need?"
           value={prompt}
@@ -103,7 +112,14 @@ export default function Ask(): ReactNode {
       <View style={styles.examples}>
         {['Repair my week', 'Who should I follow up with?', 'Watch for a used bike'].map(
           (example) => (
-            <Pill key={example}>{example}</Pill>
+            <Pressable
+              key={example}
+              accessibilityRole="button"
+              accessibilityLabel={`Use example: ${example}`}
+              onPress={() => setPrompt(example)}
+            >
+              <Pill>{example}</Pill>
+            </Pressable>
           ),
         )}
       </View>
@@ -135,4 +151,5 @@ export default function Ask(): ReactNode {
 
 const styles = StyleSheet.create({
   examples: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  askIdentity: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
 });

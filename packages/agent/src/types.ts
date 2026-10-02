@@ -39,6 +39,14 @@ export interface RerankedCandidate extends Candidate {
   readonly rationale: string;
 }
 
+export interface RerankOutcomeExample {
+  readonly intent: IntentKind;
+  readonly met: boolean;
+  readonly rating: number | null;
+  readonly priorVerdictScore: number | null;
+  readonly priorVerdictReason: string | null;
+}
+
 export interface ConversationTurn {
   readonly speakerAgentId: string;
   readonly turnIndex: number;

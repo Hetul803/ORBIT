@@ -1,9 +1,35 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
+import * as Device from 'expo-device';
+import { Platform } from 'react-native';
 
 import { useAuthStore } from './store';
+import { resolveApiUrl } from './api-url';
 
-const baseUrl = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:4100';
-const cachePrefix = 'orbit.api-cache:';
+export { resolveApiUrl } from './api-url';
+
+const developmentHost =
+  Constants.expoConfig?.hostUri ??
+  (Constants.expoGoConfig as { debuggerHost?: string } | null)?.debuggerHost;
+
+export const configuredApiUrl = resolveApiUrl({
+  ...(process.env.EXPO_PUBLIC_API_URL === undefined
+    ? {}
+    : { configured: process.env.EXPO_PUBLIC_API_URL }),
+  platform: Platform.OS,
+  physicalDevice: Device.isDevice,
+  ...(developmentHost === undefined ? {} : { developmentHost }),
+  ...(typeof window === 'undefined' ? {} : { webHost: window.location.hostname }),
+  production: process.env.NODE_ENV === 'production',
+});
+
+export const requireApiUrl = (): string => {
+  if (configuredApiUrl.length > 0) return configuredApiUrl;
+  throw new ApiRequestError(
+    'ORBIT is not connected. Set EXPO_PUBLIC_API_URL for this device and restart the app.',
+    0,
+    'API_URL_MISSING',
+  );
+};
 
 export class ApiRequestError extends Error {
   public constructor(
@@ -40,6 +66,7 @@ const fetchWithAuth = async (path: string, init: RequestInit): Promise<Response>
   const headers = new Headers(init.headers);
   if (!(init.body instanceof FormData)) headers.set('Content-Type', 'application/json');
   if (state.accessToken !== null) headers.set('Authorization', `Bearer ${state.accessToken}`);
+  const baseUrl = requireApiUrl();
   let response = await fetch(`${baseUrl}${path}`, { ...init, headers });
   if (response.status !== 401 || state.refreshToken === null) return response;
   const refreshed = await fetch(`${baseUrl}/v1/auth/refresh`, {
@@ -59,20 +86,8 @@ const fetchWithAuth = async (path: string, init: RequestInit): Promise<Response>
 };
 
 export const api = async <T>(path: string, init: RequestInit = {}): Promise<T> => {
-  const method = init.method ?? 'GET';
-  try {
-    const response = await fetchWithAuth(path, init);
-    const value = await decode<T>(response);
-    if (method === 'GET')
-      await AsyncStorage.setItem(`${cachePrefix}${path}`, JSON.stringify(value));
-    return value;
-  } catch (error: unknown) {
-    if (method === 'GET') {
-      const cached = await AsyncStorage.getItem(`${cachePrefix}${path}`);
-      if (cached !== null) return JSON.parse(cached) as T;
-    }
-    throw error;
-  }
+  const response = await fetchWithAuth(path, init);
+  return decode<T>(response);
 };
 
 export const jsonBody = (value: unknown): RequestInit => ({

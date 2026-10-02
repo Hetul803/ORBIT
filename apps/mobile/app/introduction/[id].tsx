@@ -2,10 +2,20 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState, type ReactNode } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
-import { Button, Card, colors, OrbitText, Pill, Screen, spacing } from '@orbit/ui';
+import {
+  Button,
+  Card,
+  OrbitText,
+  Pill,
+  radii,
+  Ring,
+  Screen,
+  spacing,
+  useOrbitTheme,
+} from '@orbit/ui';
 
 import { api, jsonBody } from '@/api';
-import { AppHeader, ErrorText, Field, Notice } from '@/components';
+import { AppHeader, ErrorText, Field, Notice, QueryError } from '@/components';
 
 interface IntroductionDetail {
   id: string;
@@ -39,13 +49,23 @@ const Choice = ({
   selected: boolean;
   label: string;
   onPress: () => void;
-}): ReactNode => (
-  <Pressable onPress={onPress} style={[styles.choice, selected && styles.choiceSelected]}>
-    <OrbitText variant="label">{label}</OrbitText>
-  </Pressable>
-);
+}): ReactNode => {
+  const { colors } = useOrbitTheme();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ selected }}
+      onPress={onPress}
+      style={[styles.choice, { borderColor: selected ? colors.yours : colors.hairlineStrong }]}
+    >
+      <OrbitText variant="label">{label}</OrbitText>
+    </Pressable>
+  );
+};
 
 export default function IntroductionScreen(): ReactNode {
+  const { colors } = useOrbitTheme();
   const params = useLocalSearchParams<{ id: string }>();
   const id = params.id;
   const client = useQueryClient();
@@ -101,6 +121,13 @@ export default function IntroductionScreen(): ReactNode {
     },
   });
   const intro = detail.data;
+  if (detail.isError)
+    return (
+      <Screen>
+        <AppHeader title="Compatibility" />
+        <QueryError message={detail.error.message} onRetry={() => void detail.refetch()} />
+      </Screen>
+    );
   if (intro === undefined)
     return (
       <Screen>
@@ -112,10 +139,8 @@ export default function IntroductionScreen(): ReactNode {
     );
   return (
     <Screen>
-      <AppHeader
-        title={`${String(intro.verdict.score)} / 100`}
-        subtitle={intro.verdict.oneLineReason}
-      />
+      <AppHeader title="Compatibility" subtitle={intro.verdict.oneLineReason} />
+      <Ring value={intro.verdict.score} tone="yours" size={72} seed={intro.id} />
       <View style={styles.pills}>
         <Pill tone="moss">{intro.intentKind.toUpperCase()}</Pill>
         <Pill>{intro.otherAgent.name} · IDENTITY SEALED</Pill>
@@ -132,15 +157,28 @@ export default function IntroductionScreen(): ReactNode {
       </Card>
       <Card>
         <OrbitText variant="mono">REDACTED AGENT TRANSCRIPT</OrbitText>
-        {(transcript.data?.messages ?? []).map((message) => (
-          <View
-            key={message.id}
-            style={[styles.message, message.turnIndex % 2 === 1 && styles.messageOther]}
-          >
-            <OrbitText variant="caption">AGENT {message.turnIndex % 2 === 0 ? 'A' : 'B'}</OrbitText>
-            <OrbitText>{message.redactedContent}</OrbitText>
-          </View>
-        ))}
+        {transcript.isError ? (
+          <QueryError
+            message={transcript.error.message}
+            onRetry={() => void transcript.refetch()}
+          />
+        ) : (
+          (transcript.data?.messages ?? []).map((message) => (
+            <View key={message.id} style={[styles.message, { borderTopColor: colors.hairline }]}>
+              <Ring
+                value={(message.turnIndex + 1) / Math.max(1, transcript.data?.messages.length ?? 1)}
+                tone={message.turnIndex % 2 === 0 ? 'yours' : 'rented'}
+                size={30}
+                seed={message.speakerAgentId}
+              />
+              <OrbitText variant="caption">
+                AGENT {message.turnIndex % 2 === 0 ? 'A' : 'B'} · TURN{' '}
+                {String(message.turnIndex + 1)}
+              </OrbitText>
+              <OrbitText>{message.redactedContent}</OrbitText>
+            </View>
+          ))
+        )}
         <OrbitText variant="caption">
           Names, contact information, addresses, employers, class sections, and exact schedules are
           removed before storage.
@@ -275,29 +313,18 @@ export default function IntroductionScreen(): ReactNode {
 const styles = StyleSheet.create({
   pills: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   message: {
-    alignSelf: 'flex-start',
-    maxWidth: '90%',
-    backgroundColor: colors.blueLight,
-    borderRadius: 16,
-    borderBottomLeftRadius: 4,
-    padding: spacing.md,
+    width: '100%',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingVertical: spacing.md,
     gap: spacing.xs,
-  },
-  messageOther: {
-    alignSelf: 'flex-end',
-    backgroundColor: colors.mossLight,
-    borderBottomLeftRadius: 16,
-    borderBottomRightRadius: 4,
   },
   choices: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   choice: {
     borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: 999,
+    borderRadius: radii.sm,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
   },
-  choiceSelected: { borderColor: colors.ember, backgroundColor: colors.emberLight },
   outcome: { gap: spacing.md },
   revealedProfile: { gap: spacing.xs },
 });

@@ -1,4 +1,4 @@
-import { createPrismaClient, IntentKind, type PrismaClient } from '@orbit/db';
+import { createPrismaClient, IntentKind, Prisma, type PrismaClient } from '@orbit/db';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -84,6 +84,13 @@ describe.runIf(enabled)('watcher worker integration', () => {
       LLM_DEFAULT_PROVIDER: 'stub',
       INTRODUCTIONS_PER_USER_PER_DAY: '1',
     });
+    const agents = await db.agent.findMany({ where: { userId: { in: [userA.id, userB.id] } } });
+    const vector = `[${['1', ...Array.from({ length: 1535 }, () => '0')].join(',')}]`;
+    for (const agent of agents) {
+      await db.$executeRaw(
+        Prisma.sql`UPDATE "Agent" SET "profileEmbedding" = ${vector}::vector WHERE "id" = ${agent.id}`,
+      );
+    }
     const before = await db.introduction.count();
     const result = await runNightly(db, createModelRouter(db, config), config);
     const after = await db.introduction.count();

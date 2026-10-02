@@ -5,7 +5,7 @@ import { StyleSheet, View } from 'react-native';
 import { Button, Card, Icon, OrbitText, Pill, Screen, spacing } from '@orbit/ui';
 
 import { api } from '@/api';
-import { AppHeader, Metric, Notice } from '@/components';
+import { AppHeader, Metric, Notice, QueryError } from '@/components';
 
 interface RunDetail {
   id: string;
@@ -45,7 +45,9 @@ export default function RunScreen(): ReactNode {
         title="Work receipt"
         subtitle="See exactly what happened, what it cost, and where autonomy stopped."
       />
-      {run === undefined ? (
+      {query.isError ? (
+        <QueryError message={query.error.message} onRetry={() => void query.refetch()} />
+      ) : run === undefined ? (
         <Card>
           <OrbitText>Loading the signed execution record…</OrbitText>
         </Card>

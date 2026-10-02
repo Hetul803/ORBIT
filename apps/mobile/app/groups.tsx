@@ -4,7 +4,7 @@ import { useState, type ReactNode } from 'react';
 import { Button, Card, OrbitText, Pill, Screen } from '@orbit/ui';
 
 import { api, jsonBody } from '@/api';
-import { AppHeader, ErrorText, Field, Notice } from '@/components';
+import { AppHeader, EmptyState, ErrorText, Field, Notice, QueryError } from '@/components';
 
 interface Group {
   id: string;
@@ -17,7 +17,7 @@ interface Group {
 export default function Groups(): ReactNode {
   const client = useQueryClient();
   const query = useQuery({ queryKey: ['groups'], queryFn: () => api<Group[]>('/v1/groups') });
-  const [code, setCode] = useState('ORBIT-DEMO');
+  const [code, setCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const join = async (): Promise<void> => {
     setError(null);
@@ -43,22 +43,31 @@ export default function Groups(): ReactNode {
         <Field label="Join code" value={code} onChangeText={setCode} autoCapitalize="characters" />
         <Button label="Join group" onPress={() => void join()} />
       </Card>
-      {(query.data ?? []).map((group) => (
-        <Card key={group.id}>
-          <Pill tone="blue">
-            {group.kind.toUpperCase()} · {group.visibility.toUpperCase()}
-          </Pill>
-          <OrbitText variant="title">{group.name}</OrbitText>
-          <OrbitText>{group.memberCount} members</OrbitText>
-          <Button
-            label="Open skill shelf"
-            onPress={() =>
-              router.push({ pathname: '/group/[id]', params: { id: group.id, name: group.name } })
-            }
-            kind="secondary"
-          />
-        </Card>
-      ))}
+      {query.isError ? (
+        <QueryError message={query.error.message} onRetry={() => void query.refetch()} />
+      ) : query.data?.length === 0 ? (
+        <EmptyState
+          title="No shared circles yet."
+          detail="Join one with a real code when you receive it."
+        />
+      ) : (
+        (query.data ?? []).map((group) => (
+          <Card key={group.id}>
+            <Pill tone="blue">
+              {group.kind.toUpperCase()} · {group.visibility.toUpperCase()}
+            </Pill>
+            <OrbitText variant="title">{group.name}</OrbitText>
+            <OrbitText>{group.memberCount} members</OrbitText>
+            <Button
+              label="Open skill shelf"
+              onPress={() =>
+                router.push({ pathname: '/group/[id]', params: { id: group.id, name: group.name } })
+              }
+              kind="secondary"
+            />
+          </Card>
+        ))
+      )}
       {error === null ? null : <ErrorText message={error} />}
       <Button label="Back" onPress={() => router.back()} kind="quiet" />
     </Screen>

@@ -160,6 +160,32 @@ const modelFor = (environment: NodeJS.ProcessEnv, task: LlmTask): string => {
   return environment[key] ?? `stub-${task}-v1`;
 };
 
+const costFor = (
+  environment: NodeJS.ProcessEnv,
+  task: LlmTask,
+  direction: 'INPUT' | 'OUTPUT',
+  provider: string,
+): number => {
+  if (provider === 'stub') return 0;
+  const taskKey = `LLM_COST_${task.toUpperCase()}_${direction}_CENTS_PER_MILLION_TOKENS`;
+  const genericKey = `LLM_${direction}_COST_CENTS_PER_MILLION_TOKENS`;
+  const taskValue = environment[taskKey]?.trim();
+  const genericValue = environment[genericKey]?.trim();
+  const raw = taskValue === undefined || taskValue.length === 0 ? genericValue : taskValue;
+  if (raw === undefined) {
+    throw new Error(
+      `${genericKey} (or ${taskKey}) is required when LLM_DEFAULT_PROVIDER is not stub`,
+    );
+  }
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(
+      `${taskValue === undefined || taskValue.length === 0 ? genericKey : taskKey} must be a non-negative number`,
+    );
+  }
+  return value;
+};
+
 export const configFromEnvironment = (environment: NodeJS.ProcessEnv): ModelRouterConfig => {
   const provider = environment.LLM_DEFAULT_PROVIDER ?? 'stub';
   const fallback = environment.LLM_CHEAP_FALLBACK_MODEL ?? 'stub-fallback-v1';
@@ -184,8 +210,8 @@ export const configFromEnvironment = (environment: NodeJS.ProcessEnv): ModelRout
           fallback,
           provider,
           fallbackProvider: 'stub',
-          inputCostPerMillionTokens: provider === 'stub' ? 0 : 50,
-          outputCostPerMillionTokens: provider === 'stub' ? 0 : 200,
+          inputCostPerMillionTokens: costFor(environment, task, 'INPUT', provider),
+          outputCostPerMillionTokens: costFor(environment, task, 'OUTPUT', provider),
         },
       ]),
     ) as Record<LlmTask, RouterModelConfig>,

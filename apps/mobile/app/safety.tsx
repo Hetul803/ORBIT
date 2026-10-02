@@ -20,12 +20,17 @@ export default function Safety(): ReactNode {
   );
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const act = async (kind: 'block' | 'report'): Promise<void> => {
+  const act = async (kind: 'mute' | 'block' | 'report'): Promise<void> => {
     setError(null);
     try {
       if (kind === 'block')
         await api(
           '/v1/blocks',
+          jsonBody({ userId: subjectUserId, reason: detail || 'User safety choice' }),
+        );
+      else if (kind === 'mute')
+        await api(
+          '/v1/mutes',
           jsonBody({ userId: subjectUserId, reason: detail || 'User safety choice' }),
         );
       else
@@ -43,7 +48,9 @@ export default function Safety(): ReactNode {
       setMessage(
         kind === 'block'
           ? 'Blocked. New matching and contact are stopped.'
-          : 'Report received by the moderation queue.',
+          : kind === 'mute'
+            ? 'Muted. Their activity is hidden without notifying them.'
+            : 'Report received by the moderation queue.',
       );
     } catch (caught: unknown) {
       setError(caught instanceof Error ? caught.message : 'The safety action failed.');
@@ -88,6 +95,12 @@ export default function Safety(): ReactNode {
           hint="Available from the person-facing surface that brought you here."
         />
         <Field label="What happened?" value={detail} onChangeText={setDetail} multiline />
+        <Button
+          label="Mute quietly"
+          onPress={() => void act('mute')}
+          kind="secondary"
+          disabled={subjectUserId.length < 8}
+        />
         <Button
           label="Block immediately"
           onPress={() => void act('block')}

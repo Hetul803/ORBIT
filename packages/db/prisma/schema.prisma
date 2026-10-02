@@ -209,6 +209,7 @@ model User {
   reportsReceived       Report[]               @relation("ReportSubject")
   safetyPlans           SafetyPlan[]
   devices               Device[]
+  pushDeliveries        PushDelivery[]
   consents              Consent[]
   dailyBriefs           DailyBrief[]
   otpChallenges         OtpChallenge[]
@@ -323,6 +324,7 @@ model ExchangeProposal {
   wantItemId     String
   conversationId String?
   terms          Json
+  negotiation    Json           @default("[]")
   userADecision  RevealDecision @default(PENDING)
   userBDecision  RevealDecision @default(PENDING)
   acceptedAt     DateTime?
@@ -674,6 +676,9 @@ model SkillAdoption {
   skillId           String
   userId            String
   adaptedDefinition Json
+  adoptedVersion    Int      @default(1)
+  pendingDefinition Json?
+  pendingVersion    Int?
   adoptedAt         DateTime @default(now())
   skill             Skill    @relation(fields: [skillId], references: [id], onDelete: Cascade)
   user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -866,6 +871,7 @@ model SafetyPlan {
   shareToken        String       @unique
   sharedWithContact Boolean      @default(false)
   checkInDueAt      DateTime
+  checkInNotifiedAt DateTime?
   checkedInAt       DateTime?
   introduction      Introduction @relation(fields: [introductionId], references: [id], onDelete: Cascade)
   user              User         @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -883,11 +889,36 @@ model Device {
   userId     String
   pushToken  String   @unique
   platform   Platform
+  preferences Json     @default("{}")
   lastSeenAt DateTime @default(now())
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deliveries PushDelivery[]
 
   @@index([userId])
   @@index([platform])
+}
+
+model PushDelivery {
+  id            String   @id @default(cuid())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  userId        String
+  deviceId      String
+  eventType     String
+  title         String
+  body          String
+  deepLink      String
+  status        String   @default("QUEUED")
+  attempts      Int      @default(0)
+  nextAttemptAt DateTime @default(now())
+  sentAt        DateTime?
+  lastError     String?
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device        Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextAttemptAt])
+  @@index([userId, createdAt])
+  @@index([deviceId, createdAt])
 }
 
 model Consent {

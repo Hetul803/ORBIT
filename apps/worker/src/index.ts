@@ -1,14 +1,19 @@
 import { createPrismaClient } from '@orbit/db';
 import { Queue, Worker, type Job } from 'bullmq';
+import * as Sentry from '@sentry/node';
 
 import { loadConfig } from './config.js';
 import { runConsolidation } from './jobs/consolidation.js';
 import { runDeletion } from './jobs/deletion.js';
 import { runNightly } from './jobs/nightly.js';
+import { deliverPush } from './jobs/push.js';
 import { runWatchers } from './jobs/watchers.js';
 import { createModelRouter } from './runtime.js';
 
 const config = loadConfig();
+if (config.SENTRY_DSN !== undefined) {
+  Sentry.init({ dsn: config.SENTRY_DSN, environment: config.SENTRY_ENVIRONMENT });
+}
 const prisma = createPrismaClient();
 const router = createModelRouter(prisma, config);
 
@@ -17,11 +22,13 @@ const execute = async (name: string): Promise<unknown> => {
     case 'nightly':
       return runNightly(prisma, router, config);
     case 'watchers':
-      return runWatchers(prisma);
+      return runWatchers(prisma, router, config);
     case 'consolidation':
       return runConsolidation(prisma);
     case 'deletion':
       return runDeletion(prisma, config);
+    case 'push':
+      return deliverPush(prisma);
     default:
       throw new Error(`Unknown worker job: ${name}`);
   }
@@ -29,7 +36,7 @@ const execute = async (name: string): Promise<unknown> => {
 
 if (config.RUN_WORKER_ONCE === 'true') {
   const results = [];
-  for (const jobName of ['watchers', 'consolidation', 'deletion', 'nightly']) {
+  for (const jobName of ['watchers', 'consolidation', 'deletion', 'nightly', 'push']) {
     results.push({ jobName, result: await execute(jobName) });
   }
   process.stdout.write(`${JSON.stringify({ ok: true, results })}\n`);
@@ -41,6 +48,7 @@ if (config.RUN_WORKER_ONCE === 'true') {
     { name: 'watchers', pattern: config.WATCHER_TICK_CRON },
     { name: 'consolidation', pattern: config.CONSOLIDATION_CRON },
     { name: 'deletion', pattern: config.DELETION_CRON },
+    { name: 'push', pattern: config.PUSH_TICK_CRON },
   ] as const;
   const queues: Queue[] = [];
   const workers: Worker[] = [];
@@ -62,6 +70,9 @@ if (config.RUN_WORKER_ONCE === 'true') {
       );
     });
     worker.on('failed', (job, error) => {
+      if (config.SENTRY_DSN !== undefined) {
+        Sentry.captureException(error, { tags: { job: job?.name ?? 'unknown' } });
+      }
       process.stderr.write(
         `${JSON.stringify({ level: 'error', event: 'job.failed', job: job?.name, id: job?.id, error: error.message })}\n`,
       );

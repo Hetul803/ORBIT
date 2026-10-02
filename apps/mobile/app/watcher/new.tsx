@@ -1,6 +1,7 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState, type ReactNode } from 'react';
-import { Button, Card, OrbitText, Screen } from '@orbit/ui';
+import { Pressable, StyleSheet, View } from 'react-native';
+import { Button, Card, OrbitText, Pill, Screen, spacing } from '@orbit/ui';
 
 import { api, jsonBody } from '@/api';
 import { AppHeader, ErrorText, Field, Notice } from '@/components';
@@ -19,9 +20,8 @@ interface Interpretation {
 
 export default function NewWatcher(): ReactNode {
   const params = useLocalSearchParams<{ input?: string }>();
-  const [input, setInput] = useState(
-    params.input ?? 'Let me know when a quiet sublet under $900 appears in ORBIT.',
-  );
+  const [input, setInput] = useState(params.input ?? '');
+  const [schedule, setSchedule] = useState('0 */6 * * *');
   const [interpretation, setInterpretation] = useState<Interpretation | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,7 +39,7 @@ export default function NewWatcher(): ReactNode {
           jsonBody({
             naturalLanguage: input,
             title: interpretation.title,
-            schedule: interpretation.schedule,
+            schedule,
             confirmedSpec: interpretation.interpretation,
           }),
         );
@@ -67,6 +67,15 @@ export default function NewWatcher(): ReactNode {
           }}
           multiline
         />
+        <Field
+          label="Check schedule"
+          value={schedule}
+          onChangeText={(value) => {
+            setSchedule(value);
+            setInterpretation(null);
+          }}
+          hint="Cron expression. The default checks every six hours."
+        />
         <Button
           label={interpretation === null ? 'Interpret watcher' : 'Confirm and activate'}
           onPress={() => void submit()}
@@ -74,6 +83,40 @@ export default function NewWatcher(): ReactNode {
           disabled={input.length < 3}
         />
       </Card>
+      <View style={styles.examples}>
+        {(
+          [
+            [
+              'Product price',
+              'Watch https://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html and notify me when the price is under £60.',
+            ],
+            [
+              'Listing ceiling',
+              'Watch https://dummyjson.com/products?limit=100 and notify me about product listings under $20.',
+            ],
+            [
+              'Opportunity feed',
+              'Watch https://hnrss.org/jobs for new product design opportunities.',
+            ],
+            [
+              'Deadline page',
+              'Watch https://www.nsf.gov/funding/opportunities and notify me when a funding deadline changes.',
+            ],
+          ] as const
+        ).map(([label, value]) => (
+          <Pressable
+            key={label}
+            accessibilityRole="button"
+            accessibilityLabel={`Use ${label} watcher example`}
+            onPress={() => {
+              setInput(value);
+              setInterpretation(null);
+            }}
+          >
+            <Pill tone="rented">{label}</Pill>
+          </Pressable>
+        ))}
+      </View>
       {interpretation === null ? null : (
         <Card>
           <OrbitText variant="mono">CONFIRM THE INTERPRETATION</OrbitText>
@@ -83,12 +126,12 @@ export default function NewWatcher(): ReactNode {
           <OrbitText>
             Constraints: {JSON.stringify(interpretation.interpretation.constraints)}
           </OrbitText>
-          <OrbitText>Schedule: {interpretation.schedule}</OrbitText>
+          <OrbitText>Schedule: {schedule}</OrbitText>
         </Card>
       )}
       <Notice
         title="No hidden scraping"
-        detail="Built-in ORBIT exchange can be monitored immediately. Email, calendar, and file watchers use only explicit connector scopes."
+        detail="Public URL, RSS, Atom, and JSON sources run now. Login pages and social networks are rejected. Email remains unavailable until Google OAuth is configured."
         tone="moss"
       />
       {error === null ? null : <ErrorText message={error} />}
@@ -96,3 +139,7 @@ export default function NewWatcher(): ReactNode {
     </Screen>
   );
 }
+
+const styles = StyleSheet.create({
+  examples: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+});

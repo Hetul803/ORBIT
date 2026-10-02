@@ -1,36 +1,45 @@
+import { FlashList } from '@shopify/flash-list';
 import { useQuery } from '@tanstack/react-query';
 import { router, type Href } from 'expo-router';
-import { useState, type ReactNode } from 'react';
-import { Pressable, RefreshControl, StyleSheet, View } from 'react-native';
+import type { ReactNode } from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
 import {
   Button,
   Card,
-  colors,
   Icon,
   OrbitText,
   Pill,
+  Ring,
+  radii,
   Screen,
   SectionHeader,
   Skeleton,
   spacing,
+  useOrbitTheme,
 } from '@orbit/ui';
 
 import { api } from '@/api';
-import { AppHeader, Metric } from '@/components';
-import { demoBrief } from '@/demo';
+import { AppHeader, EmptyState, Metric, QueryError } from '@/components';
 import type { BriefItem, DailyBrief } from '@/types';
 
 const BriefCard = ({ item }: { item: BriefItem }): ReactNode => (
   <Pressable
+    accessibilityRole="button"
+    accessibilityLabel={`Open ${item.title}`}
     onPress={() => router.push(item.href as Href)}
     style={({ pressed }) => pressed && styles.pressed}
   >
-    <Card tone={item.needsUser ? 'ember' : item.kind === 'watcher_hit' ? 'blue' : 'paper'}>
+    <Card tone={item.needsUser ? 'alert' : item.kind === 'watcher_hit' ? 'rented' : 'paper'}>
       <View style={styles.cardTop}>
-        <Pill tone={item.needsUser ? 'ember' : item.kind === 'watcher_hit' ? 'blue' : 'moss'}>
+        <Pill tone={item.needsUser ? 'alert' : item.kind === 'watcher_hit' ? 'rented' : 'yours'}>
           {item.skillName}
         </Pill>
-        <Icon name="arrow" size={18} />
+        <Ring
+          value={item.autonomy}
+          tone={item.kind === 'watcher_hit' ? 'rented' : 'yours'}
+          size={38}
+          seed={item.id}
+        />
       </View>
       <OrbitText variant="title">{item.title}</OrbitText>
       <OrbitText>{item.detail}</OrbitText>
@@ -48,86 +57,110 @@ const BriefCard = ({ item }: { item: BriefItem }): ReactNode => (
 );
 
 export default function Today(): ReactNode {
-  const [refreshing, setRefreshing] = useState(false);
+  const { colors } = useOrbitTheme();
   const query = useQuery({
     queryKey: ['brief', 'today'],
     queryFn: () => api<DailyBrief>('/v1/brief/today'),
   });
-  const brief = query.data ?? demoBrief;
-  const refresh = async (): Promise<void> => {
-    setRefreshing(true);
-    await query.refetch();
-    setRefreshing(false);
-  };
+  const brief = query.data;
   return (
-    <Screen contentStyle={styles.screen}>
-      <RefreshControl
-        refreshing={refreshing}
-        onRefresh={() => void refresh()}
-        tintColor={colors.ink}
-      />
-      <AppHeader
-        title="Good morning."
-        subtitle="Your private briefing—not a feed designed to keep you scrolling."
-        action={
-          <Pressable onPress={() => router.push('/inbox')} style={styles.inbox}>
-            <Icon name="mail" />
-          </Pressable>
+    <Screen scroll={false} contentStyle={styles.screen}>
+      <FlashList
+        data={query.isError ? [] : (brief?.items ?? [])}
+        keyExtractor={(item) => item.id}
+        refreshing={query.isFetching && !query.isPending}
+        onRefresh={() => void query.refetch()}
+        contentContainerStyle={styles.list}
+        ItemSeparatorComponent={() => <View style={styles.separator} />}
+        ListHeaderComponent={
+          <View style={styles.headerContent}>
+            <AppHeader
+              title="Good morning."
+              subtitle="Your private briefing—not a feed designed to keep you scrolling."
+              action={
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Open inbox"
+                  onPress={() => router.push('/inbox')}
+                  style={[styles.inbox, { borderColor: colors.hairline }]}
+                >
+                  <Icon name="mail" />
+                </Pressable>
+              }
+            />
+            {brief === undefined || query.isError ? null : (
+              <Card tone="yours" style={styles.summary}>
+                <OrbitText variant="mono">WHILE YOU WERE AWAY</OrbitText>
+                <OrbitText variant="title">{brief.greeting}</OrbitText>
+                <View style={styles.metrics}>
+                  <Metric value={String(brief.completedCount)} label="completed" />
+                  <Metric value={String(brief.needsUserCount)} label="needs you" />
+                  <Metric
+                    value={`${String(brief.timeSavedMinutesThisWeek)}m`}
+                    label="saved this week"
+                  />
+                </View>
+              </Card>
+            )}
+            <SectionHeader
+              eyebrow="DAILY BRIEF"
+              title="What moved"
+              aside={
+                <Button
+                  label="Add watcher"
+                  kind="quiet"
+                  onPress={() => router.push('/watcher/new')}
+                />
+              }
+            />
+          </View>
         }
-      />
-      <Card tone="moss" style={styles.summary}>
-        <OrbitText variant="mono">WHILE YOU WERE AWAY</OrbitText>
-        <OrbitText variant="title">{brief.greeting}</OrbitText>
-        <View style={styles.metrics}>
-          <Metric value={String(brief.completedCount)} label="completed" />
-          <Metric value={String(brief.needsUserCount)} label="needs you" />
-          <Metric value={`${String(brief.timeSavedMinutesThisWeek)}m`} label="saved this week" />
-        </View>
-      </Card>
-      <SectionHeader
-        eyebrow="DAILY BRIEF"
-        title="What moved"
-        aside={
-          <Button label="Add watcher" kind="quiet" onPress={() => router.push('/watcher/new')} />
+        ListEmptyComponent={
+          query.isPending ? (
+            <View style={styles.loading}>
+              <Skeleton height={190} />
+              <Skeleton height={170} />
+            </View>
+          ) : query.isError ? (
+            <QueryError message={query.error.message} onRetry={() => void query.refetch()} />
+          ) : (
+            <EmptyState
+              title="Nothing needs you."
+              detail="Your agent will place completed work, matches, and decisions here."
+              action={
+                <Button
+                  label="Create a watcher"
+                  kind="secondary"
+                  onPress={() => router.push('/watcher/new')}
+                />
+              }
+            />
+          )
         }
+        renderItem={({ item }) => <BriefCard item={item} />}
       />
-      {query.isLoading ? (
-        <>
-          <Skeleton height={190} />
-          <Skeleton height={170} />
-        </>
-      ) : brief.items.length === 0 ? (
-        <Card>
-          <OrbitText variant="title">Nothing needs you.</OrbitText>
-          <OrbitText>Your agent will place completed work, matches, and decisions here.</OrbitText>
-        </Card>
-      ) : (
-        brief.items.map((item) => <BriefCard key={item.id} item={item} />)
-      )}
-      {query.isError ? (
-        <OrbitText variant="caption">
-          Showing your last private brief while ORBIT reconnects.
-        </OrbitText>
-      ) : null}
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { paddingBottom: 110 },
+  screen: { paddingBottom: 0 },
+  list: { paddingBottom: spacing.xxl },
+  headerContent: { gap: spacing.lg, paddingBottom: spacing.lg },
+  separator: { height: spacing.md },
+  loading: { gap: spacing.md },
   summary: { paddingVertical: spacing.xl },
   metrics: { flexDirection: 'row', gap: spacing.lg, marginTop: spacing.sm },
   cardTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   receipt: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, marginTop: spacing.sm },
-  needs: { color: colors.ember, fontFamily: 'InstrumentSans_600SemiBold' },
+  needs: { fontFamily: 'InstrumentSans_600SemiBold' },
   pressed: { opacity: 0.72 },
   inbox: {
     width: 44,
     height: 44,
-    borderRadius: 22,
+    borderRadius: radii.sm,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: colors.line,
   },
 });

@@ -2,10 +2,10 @@ import { useQuery } from '@tanstack/react-query';
 import { router } from 'expo-router';
 import type { ReactNode } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { Button, Card, OrbitText, Pill, Screen, spacing } from '@orbit/ui';
+import { Button, Card, OrbitText, Pill, Ring, Screen, spacing } from '@orbit/ui';
 
 import { api } from '@/api';
-import { AppHeader, RowLink } from '@/components';
+import { AppHeader, QueryError, RowLink } from '@/components';
 import { useAuthStore } from '@/store';
 import type { CurrentUser } from '@/types';
 
@@ -19,24 +19,30 @@ export default function You(): ReactNode {
         title={user?.displayName ?? 'Your orbit'}
         subtitle="Your controls, receipts, memory, and trust boundaries live together."
       />
-      <Card tone="moss">
-        <View style={styles.identity}>
-          <View style={styles.avatar}>
-            <OrbitText variant="title">
-              {(user?.displayName ?? 'O').slice(0, 1).toUpperCase()}
-            </OrbitText>
+      {query.isError ? (
+        <QueryError message={query.error.message} onRetry={() => void query.refetch()} />
+      ) : null}
+      {query.isError ? null : (
+        <Card tone="moss">
+          <View style={styles.identity}>
+            <Ring
+              value={user === undefined ? 0 : 1}
+              tone="yours"
+              size={48}
+              seed={user?.id ?? 'private'}
+            />
+            <View style={styles.flex}>
+              <OrbitText variant="label">{user?.email ?? 'Signed in privately'}</OrbitText>
+              <OrbitText variant="caption">
+                {user?.handle === null || user?.handle === undefined
+                  ? 'No public handle'
+                  : `@${user.handle}`}
+              </OrbitText>
+            </View>
+            <Pill tone="moss">18+ VERIFIED</Pill>
           </View>
-          <View style={styles.flex}>
-            <OrbitText variant="label">{user?.email ?? 'Signed in privately'}</OrbitText>
-            <OrbitText variant="caption">
-              {user?.handle === null || user?.handle === undefined
-                ? 'No public handle'
-                : `@${user.handle}`}
-            </OrbitText>
-          </View>
-          <Pill tone="moss">18+ VERIFIED</Pill>
-        </View>
-      </Card>
+        </Card>
+      )}
       <Card>
         <RowLink
           title="Memory"
@@ -66,6 +72,14 @@ export default function You(): ReactNode {
           detail="Trust modes, providers, export, deletion"
           onPress={() => router.push('/settings')}
         />
+        {user?.role === 'admin' || user?.role === 'moderator' ? (
+          <RowLink
+            title="Moderation console"
+            detail="Role-gated report queue, actions, and audit"
+            onPress={() => router.push('/admin')}
+            icon="shield"
+          />
+        ) : null}
       </Card>
       <Button
         label="Sign out"
@@ -78,13 +92,5 @@ export default function You(): ReactNode {
 
 const styles = StyleSheet.create({
   identity: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
-  avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#FFFCF5',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   flex: { flex: 1 },
 });

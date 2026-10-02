@@ -4,14 +4,16 @@ import {
   selectCandidates,
   type AgentPersona,
   type Candidate,
+  type RerankOutcomeExample,
 } from '@orbit/agent';
 import {
   ConversationStatus,
   MatchStatus,
   RevealDecision,
   RunStatus,
+  queuePush,
+  Prisma,
   type IntentKind,
-  type Prisma,
   type PrismaClient,
 } from '@orbit/db';
 import type { ModelRouter } from '@orbit/llm';
@@ -35,19 +37,117 @@ const loadAgents = async (db: PrismaClient) =>
 
 const toApiIntent = (kind: IntentKind): ApiIntentKind => kind.toLowerCase() as ApiIntentKind;
 
-const tokens = (value: string): Set<string> =>
-  new Set(value.toLowerCase().match(/[a-z0-9]{3,}/gu) ?? []);
-
-const lexicalScore = (left: string, right: string): number => {
-  const a = tokens(left);
-  const b = tokens(right);
-  if (a.size === 0 || b.size === 0) return 0.25;
-  const overlap = [...a].filter((token) => b.has(token)).length;
-  return Math.min(0.99, 0.25 + overlap / Math.max(a.size, b.size));
-};
-
 const profileText = (agent: LoadedAgent): string =>
   [agent.profileSummary, ...agent.memoryFacts.map((fact) => fact.content)].join(' ');
+
+interface VectorCandidateRow {
+  readonly agentId: string;
+  readonly retrievalScore: number;
+}
+
+export const retrieveVectorCandidates = async (
+  db: PrismaClient,
+  sourceAgentId: string,
+  intentKind: IntentKind,
+  limit = 20,
+): Promise<readonly VectorCandidateRow[]> => {
+  const activeAfter = new Date(Date.now() - 14 * 86_400_000);
+  const rows = await db.$queryRaw<VectorCandidateRow[]>(Prisma.sql`
+    SELECT
+      candidate."id" AS "agentId",
+      (1 - (source."profileEmbedding" <=> candidate."profileEmbedding"))::double precision
+        AS "retrievalScore"
+    FROM "Agent" source
+    JOIN "User" source_user ON source_user."id" = source."userId"
+    JOIN "Agent" candidate ON candidate."id" <> source."id"
+    JOIN "User" candidate_user ON candidate_user."id" = candidate."userId"
+    WHERE source."id" = ${sourceAgentId}
+      AND source."deletedAt" IS NULL
+      AND source."profileEmbedding" IS NOT NULL
+      AND candidate."deletedAt" IS NULL
+      AND candidate."profileEmbedding" IS NOT NULL
+      AND candidate_user."status" = 'ACTIVE'::"UserStatus"
+      AND candidate_user."deletedAt" IS NULL
+      AND candidate_user."lastActiveAt" >= ${activeAfter}
+      AND candidate_user."dateOfBirth" <= (NOW() - INTERVAL '18 years')
+      AND (
+        source_user."campusId" IS NULL
+        OR candidate_user."campusId" IS NULL
+        OR source_user."campusId" = candidate_user."campusId"
+      )
+      AND EXISTS (
+        SELECT 1 FROM "Intent" candidate_intent
+        WHERE candidate_intent."userId" = candidate_user."id"
+          AND candidate_intent."kind" = ${intentKind}::"IntentKind"
+          AND candidate_intent."active" = TRUE
+          AND candidate_intent."deletedAt" IS NULL
+          AND (candidate_intent."pausedUntil" IS NULL OR candidate_intent."pausedUntil" <= NOW())
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM "Block" block
+        WHERE block."deletedAt" IS NULL
+          AND (
+            (block."blockerUserId" = source_user."id" AND block."blockedUserId" = candidate_user."id")
+            OR
+            (block."blockerUserId" = candidate_user."id" AND block."blockedUserId" = source_user."id")
+          )
+      )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM "Introduction" introduction
+        JOIN "AgentConversation" conversation
+          ON conversation."id" = introduction."conversationId"
+        WHERE introduction."deletedAt" IS NULL
+          AND conversation."intentKind" = ${intentKind}::"IntentKind"
+          AND (
+            (introduction."userAId" = source_user."id" AND introduction."userBId" = candidate_user."id")
+            OR
+            (introduction."userAId" = candidate_user."id" AND introduction."userBId" = source_user."id")
+          )
+      )
+    ORDER BY source."profileEmbedding" <=> candidate."profileEmbedding" ASC
+    LIMIT ${Math.max(1, Math.min(limit, 100))}
+  `);
+  return rows.map((row) => ({
+    agentId: row.agentId,
+    retrievalScore: Math.max(0, Math.min(1, row.retrievalScore)),
+  }));
+};
+
+const verdictFields = (
+  value: Prisma.JsonValue | null,
+): { score: number | null; reason: string | null } => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return { score: null, reason: null };
+  }
+  const record = value as Record<string, unknown>;
+  return {
+    score: typeof record.score === 'number' ? record.score : null,
+    reason: typeof record.oneLineReason === 'string' ? record.oneLineReason.slice(0, 240) : null,
+  };
+};
+
+const outcomeExamples = async (
+  db: PrismaClient,
+  userId: string,
+): Promise<readonly RerankOutcomeExample[]> => {
+  const outcomes = await db.introductionOutcome.findMany({
+    where: { userId, deletedAt: null },
+    include: { introduction: { include: { conversation: true } } },
+    orderBy: { reportedAt: 'desc' },
+    take: 5,
+  });
+  return outcomes.map((outcome) => {
+    const verdict = verdictFields(outcome.introduction.conversation.verdict);
+    return {
+      intent: toApiIntent(outcome.introduction.conversation.intentKind),
+      met: outcome.met,
+      rating: outcome.rating,
+      priorVerdictScore: verdict.score,
+      priorVerdictReason: verdict.reason,
+    };
+  });
+};
 
 const voice = (value: Prisma.JsonValue): AgentPersona['voice'] => {
   const record =
@@ -329,6 +429,16 @@ const buildBriefs = async (db: PrismaClient): Promise<void> => {
         },
       },
     });
+    await queuePush(db, {
+      userId: user.id,
+      eventType: 'brief',
+      title: 'Your ORBIT brief is ready',
+      body:
+        items.length === 0
+          ? 'Nothing needs you this morning.'
+          : `${String(items.length)} things moved while you were away.`,
+      deepLink: 'orbit://today',
+    });
   }
 };
 
@@ -338,19 +448,7 @@ export const runNightly = async (
   config: WorkerConfig,
 ): Promise<{ introductions: number }> => {
   const agents = await loadAgents(db);
-  const [blocks, existing] = await Promise.all([
-    db.block.findMany({ where: { deletedAt: null } }),
-    db.introduction.findMany({ include: { conversation: true } }),
-  ]);
-  const blocked = new Set(
-    blocks.flatMap((block) => [
-      `${block.blockerUserId}:${block.blockedUserId}`,
-      `${block.blockedUserId}:${block.blockerUserId}`,
-    ]),
-  );
-  const previouslyIntroduced = new Set(
-    existing.map((intro) => pairKey(intro.userAId, intro.userBId, intro.conversation.intentKind)),
-  );
+  const agentById = new Map(agents.map((agent) => [agent.id, agent]));
   const processed = new Set<string>();
   const createdByUser = new Map<string, number>();
   let introductions = 0;
@@ -360,26 +458,23 @@ export const runNightly = async (
       if (intent.pausedUntil !== null && intent.pausedUntil > new Date()) continue;
       if ((createdByUser.get(source.userId) ?? 0) >= config.INTRODUCTIONS_PER_USER_PER_DAY)
         continue;
-      const potential = agents.filter(
-        (candidate) =>
-          candidate.id !== source.id &&
-          candidate.user.intents.some((value) => value.kind === intent.kind) &&
-          !processed.has(pairKey(source.userId, candidate.userId, intent.kind)),
-      );
+      const vectorRows = await retrieveVectorCandidates(db, source.id, intent.kind);
+      const potential = vectorRows
+        .map((row) => agentById.get(row.agentId))
+        .filter((candidate): candidate is LoadedAgent => candidate !== undefined)
+        .filter(
+          (candidate) => !processed.has(pairKey(source.userId, candidate.userId, intent.kind)),
+        );
+      const scoreByAgent = new Map(vectorRows.map((row) => [row.agentId, row.retrievalScore]));
       const candidates: Candidate[] = potential.map((candidate) => ({
         agentId: candidate.id,
-        retrievalScore: lexicalScore(profileText(source), profileText(candidate)),
+        retrievalScore: scoreByAgent.get(candidate.id) ?? 0,
         compatible: true,
-        sameScope:
-          source.user.campusId === null ||
-          candidate.user.campusId === null ||
-          source.user.campusId === candidate.user.campusId,
+        sameScope: true,
         withinAgeBand: true,
-        blocked: blocked.has(`${source.userId}:${candidate.userId}`),
-        alreadyIntroduced: previouslyIntroduced.has(
-          pairKey(source.userId, candidate.userId, intent.kind),
-        ),
-        activeWithin14Days: candidate.user.lastActiveAt >= new Date(Date.now() - 14 * 86_400_000),
+        blocked: false,
+        alreadyIntroduced: false,
+        activeWithin14Days: true,
       }));
       const selected = selectCandidates(candidates);
       if (selected.length === 0) continue;
@@ -396,7 +491,11 @@ export const runNightly = async (
         new Map(potential.map((candidate) => [candidate.id, profileText(candidate)])),
         { kind: toApiIntent(intent.kind), params: intent.params as Record<string, unknown> },
         router,
-        { userId: source.userId, runId: run.id },
+        {
+          userId: source.userId,
+          runId: run.id,
+          outcomeExamples: await outcomeExamples(db, source.userId),
+        },
       );
       await db.run.update({
         where: { id: run.id },

@@ -1,10 +1,11 @@
 import {
   GroupRole,
   InboxTriage,
-  type Prisma,
+  Prisma,
   RunStatus,
   type ScreeningAction,
   SkillStatus,
+  queuePush,
 } from '@orbit/db';
 import {
   approveInboxSchema,
@@ -28,19 +29,50 @@ const idParamsSchema = z.object({ id: z.string().min(8) });
 
 const parseWatcherSpec = (naturalLanguage: string) => {
   const lower = naturalLanguage.toLowerCase();
-  const price = /(?:under|below|less than)\s*\$?([\d,]+)/u.exec(lower)?.[1];
-  const source = /email|inbox/u.test(lower)
-    ? 'email'
-    : /calendar|deadline/u.test(lower)
-      ? 'calendar'
-      : /file|document|drive/u.test(lower)
-        ? 'files'
-        : 'orbit';
+  const price = /(?:under|below|less than)\s*[$£€]?([\d,]+)/u.exec(lower)?.[1];
+  const currency = naturalLanguage.includes('£')
+    ? 'GBP'
+    : naturalLanguage.includes('€')
+      ? 'EUR'
+      : naturalLanguage.includes('$')
+        ? 'USD'
+        : undefined;
+  const url = /https?:\/\/[^\s<>"')\]]+/iu.exec(naturalLanguage)?.[0];
+  const source =
+    url !== undefined
+      ? 'web'
+      : /search (?:the )?web|web search|search online/u.test(lower)
+        ? 'web'
+        : /email|inbox/u.test(lower)
+          ? 'email'
+          : /calendar|deadline/u.test(lower)
+            ? 'calendar'
+            : /file|document|drive/u.test(lower)
+              ? 'files'
+              : 'orbit';
   return watcherSpecSchema.parse({
     query: naturalLanguage,
     source,
+    ...(url === undefined ? {} : { url }),
+    format:
+      url === undefined && /search (?:the )?web|web search|search online/u.test(lower)
+        ? 'search_api'
+        : lower.includes('rss')
+          ? 'rss'
+          : lower.includes('atom')
+            ? 'atom'
+            : /json|api/u.test(lower)
+              ? lower.includes('search')
+                ? 'search_api'
+                : 'json'
+              : 'auto',
     constraints:
-      price === undefined ? {} : { maximumCents: Number(price.replaceAll(',', '')) * 100 },
+      price === undefined
+        ? {}
+        : {
+            maximumCents: Number(price.replaceAll(',', '')) * 100,
+            ...(currency === undefined ? {} : { currency }),
+          },
     notifyOn: 'new match',
   });
 };
@@ -198,12 +230,12 @@ export const registerWorkRoutes = (app: FastifyInstance, services: Services): vo
     await services.db.$transaction(async (tx) => {
       await tx.inboxItem.update({
         where: { id: current.id },
-        data: { agentReply: body.editedReply, approvedAt, triage: InboxTriage.ANSWERED },
+        data: { agentReply: body.editedReply, approvedAt, triage: InboxTriage.HELD },
       });
       await logActivity(tx, {
         userId: auth.id,
         actorType: 'USER',
-        action: 'outbound_reply.approved',
+        action: 'outbound_reply.approved_not_sent',
         targetType: 'InboxItem',
         targetId: current.id,
         payload: {
@@ -213,7 +245,12 @@ export const registerWorkRoutes = (app: FastifyInstance, services: Services): vo
         requestId: request.id,
       });
     });
-    return { ok: true, approvedAt: approvedAt.toISOString(), sent: true };
+    return {
+      ok: true,
+      approvedAt: approvedAt.toISOString(),
+      sent: false,
+      reason: 'No outbound mail scope or delivery adapter is enabled.',
+    };
   });
 
   app.post('/v1/inbox/:id/decline', async (request) => {
@@ -252,6 +289,35 @@ export const registerWorkRoutes = (app: FastifyInstance, services: Services): vo
     }));
   });
 
+  app.post('/v1/screening-rules/preview', async (request) => {
+    const auth = await requireAuth(request, services.config);
+    const body = parseWith(upsertScreeningRuleSchema, request.body);
+    const fromNeedle = typeof body.matchOn.from === 'string' ? body.matchOn.from.toLowerCase() : '';
+    const subjectNeedle =
+      typeof body.matchOn.subjectIncludes === 'string'
+        ? body.matchOn.subjectIncludes.toLowerCase()
+        : '';
+    const items = await services.db.inboxItem.findMany({
+      where: { recipientUserId: auth.id, deletedAt: null },
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+    });
+    return items.map((item) => {
+      const from = /^From:\s*([^\n]+)/iu.exec(item.body)?.[1] ?? '';
+      const matches =
+        (fromNeedle.length === 0 || from.toLowerCase().includes(fromNeedle)) &&
+        (subjectNeedle.length === 0 || item.subject.toLowerCase().includes(subjectNeedle));
+      return {
+        id: item.id,
+        subject: item.subject,
+        from,
+        currentTriage: item.triage.toLowerCase(),
+        matches,
+        result: matches ? body.action : 'unchanged',
+      };
+    });
+  });
+
   app.put('/v1/screening-rules/:id', async (request) => {
     const auth = await requireAuth(request, services.config);
     const params = parseWith(idParamsSchema, request.params);
@@ -279,6 +345,18 @@ export const registerWorkRoutes = (app: FastifyInstance, services: Services): vo
     };
   });
 
+  app.delete('/v1/screening-rules/:id', async (request, reply) => {
+    const auth = await requireAuth(request, services.config);
+    const params = parseWith(idParamsSchema, request.params);
+    const result = await services.db.screeningRule.updateMany({
+      where: { id: params.id, userId: auth.id, deletedAt: null },
+      data: { deletedAt: new Date() },
+    });
+    if (result.count === 0)
+      throw new ApiError(404, 'SCREENING_RULE_NOT_FOUND', 'That screening rule was not found.');
+    return reply.code(204).send();
+  });
+
   app.get('/v1/watchers', async (request) => {
     const auth = await requireAuth(request, services.config);
     const watchers = await services.db.watcher.findMany({
@@ -300,6 +378,16 @@ export const registerWorkRoutes = (app: FastifyInstance, services: Services): vo
         title: body.title ?? body.naturalLanguage.slice(0, 80),
         schedule: body.schedule,
       });
+    }
+    if (
+      body.confirmedSpec.format === 'search_api' &&
+      services.config.SEARCH_API_KEY === undefined
+    ) {
+      throw new ApiError(
+        503,
+        'SEARCH_API_NOT_CONFIGURED',
+        'Web search watchers are unavailable until the operator configures a search API key.',
+      );
     }
     const watcher = await services.db.watcher.create({
       data: {
@@ -467,10 +555,28 @@ export const registerWorkRoutes = (app: FastifyInstance, services: Services): vo
   app.post('/v1/skills', async (request, reply) => {
     const auth = await requireAuth(request, services.config);
     const body = parseWith(createSkillSchema, request.body);
+    if (body.groupId !== undefined) {
+      const membership = await services.db.groupMember.findFirst({
+        where: {
+          groupId: body.groupId,
+          userId: auth.id,
+          role: { in: [GroupRole.ADMIN, GroupRole.OWNER] },
+          deletedAt: null,
+        },
+      });
+      if (membership === null) {
+        throw new ApiError(
+          403,
+          'GROUP_ADMIN_REQUIRED',
+          'Only a group admin or owner can publish a skill to its shelf.',
+        );
+      }
+    }
     const skill = await services.db.$transaction(async (tx) => {
       const created = await tx.skill.create({
         data: {
           ownerUserId: auth.id,
+          ...(body.groupId === undefined ? {} : { groupId: body.groupId }),
           name: body.name,
           definition: body.definition,
           autonomyPct: body.autonomyPct,
@@ -523,6 +629,36 @@ export const registerWorkRoutes = (app: FastifyInstance, services: Services): vo
           validation: { passed: false, reason: 'Revision requires replay validation' },
         },
       });
+      await tx.skillAdoption.updateMany({
+        where: { skillId: current.id, deletedAt: null },
+        data: {
+          pendingDefinition: body.revisedDefinition,
+          pendingVersion: nextVersion,
+        },
+      });
+      if (current.groupId !== null) {
+        const members = await tx.groupMember.findMany({
+          where: { groupId: current.groupId, userId: { not: auth.id }, deletedAt: null },
+          select: { userId: true },
+        });
+        for (const member of members) {
+          await tx.skillAdoption.upsert({
+            where: { skillId_userId: { skillId: current.id, userId: member.userId } },
+            update: {
+              pendingDefinition: body.revisedDefinition,
+              pendingVersion: nextVersion,
+            },
+            create: {
+              skillId: current.id,
+              userId: member.userId,
+              adaptedDefinition: current.definition as Prisma.InputJsonValue,
+              adoptedVersion: current.version,
+              pendingDefinition: body.revisedDefinition,
+              pendingVersion: nextVersion,
+            },
+          });
+        }
+      }
       return updated;
     });
     await logActivity(services.db, {
@@ -540,23 +676,47 @@ export const registerWorkRoutes = (app: FastifyInstance, services: Services): vo
   app.post('/v1/skills/:id/share', async (request, reply) => {
     const auth = await requireAuth(request, services.config);
     const params = parseWith(idParamsSchema, request.params);
-    const body = parseWith(z.object({ recipientUserId: z.string().min(8) }), request.body);
+    const body = parseWith(
+      z.object({ recipient: z.string().trim().min(2).max(320) }),
+      request.body,
+    );
     const skill = await services.db.skill.findFirst({
       where: { id: params.id, ownerUserId: auth.id, deletedAt: null },
     });
     if (skill === null) throw new ApiError(404, 'SKILL_NOT_FOUND', 'That skill was not found.');
+    const recipient = await services.db.user.findFirst({
+      where: body.recipient.includes('@')
+        ? { email: body.recipient.toLowerCase() }
+        : { handle: body.recipient.replace(/^@/u, '').toLowerCase() },
+    });
+    if (recipient === null)
+      throw new ApiError(404, 'RECIPIENT_NOT_FOUND', 'No ORBIT user matches that email or handle.');
+    if (recipient.id === auth.id)
+      throw new ApiError(400, 'SELF_SHARE', 'Choose another ORBIT user.');
     const inbox = await services.db.inboxItem.create({
       data: {
-        recipientUserId: body.recipientUserId,
+        recipientUserId: recipient.id,
         senderUserId: auth.id,
-        kind: 'skill_share',
+        kind: `skill_share:${skill.id}`,
         subject: `${skill.name} was shared with you`,
         body: `Inspect and adopt version ${String(skill.version)}. Shared skills never carry payment.`,
         triage: InboxTriage.ESCALATED,
         agentReply: null,
       },
     });
-    return reply.code(201).send({ ok: true, inboxItemId: inbox.id, noPayment: true });
+    await queuePush(services.db, {
+      userId: recipient.id,
+      eventType: 'approval',
+      title: 'A skill was shared with you',
+      body: skill.name,
+      deepLink: 'orbit://inbox',
+    });
+    return reply.code(201).send({
+      ok: true,
+      inboxItemId: inbox.id,
+      recipient: { id: recipient.id, displayName: recipient.displayName, handle: recipient.handle },
+      noPayment: true,
+    });
   });
 
   app.post('/v1/skills/:id/adopt', async (request, reply) => {
@@ -564,25 +724,96 @@ export const registerWorkRoutes = (app: FastifyInstance, services: Services): vo
     const params = parseWith(idParamsSchema, request.params);
     const skill = await services.db.skill.findFirst({ where: { id: params.id, deletedAt: null } });
     if (skill === null) throw new ApiError(404, 'SKILL_NOT_FOUND', 'That skill was not found.');
-    await services.db.$transaction([
-      services.db.skillAdoption.upsert({
+    const adoption = await services.db.$transaction(async (tx) => {
+      const saved = await tx.skillAdoption.upsert({
         where: { skillId_userId: { skillId: skill.id, userId: auth.id } },
         update: {
           adaptedDefinition: skill.definition as Prisma.InputJsonValue,
+          adoptedVersion: skill.version,
+          pendingDefinition: Prisma.JsonNull,
+          pendingVersion: null,
           adoptedAt: new Date(),
         },
         create: {
           skillId: skill.id,
           userId: auth.id,
           adaptedDefinition: skill.definition as Prisma.InputJsonValue,
+          adoptedVersion: skill.version,
         },
-      }),
-      services.db.skill.update({
+      });
+      await tx.skill.update({
         where: { id: skill.id },
         data: { adoptionCount: { increment: 1 } },
-      }),
-    ]);
-    return reply.code(201).send({ ok: true, skillId: skill.id, noPayment: true });
+      });
+      return saved;
+    });
+    return reply.code(201).send({
+      ok: true,
+      skillId: skill.id,
+      adoptionId: adoption.id,
+      adoptedVersion: adoption.adoptedVersion,
+      noPayment: true,
+    });
+  });
+
+  app.get('/v1/skill-adoptions/updates', async (request) => {
+    const auth = await requireAuth(request, services.config);
+    const query = parseWith(z.object({ groupId: z.string().min(8).optional() }), request.query);
+    const adoptions = await services.db.skillAdoption.findMany({
+      where: {
+        userId: auth.id,
+        deletedAt: null,
+        pendingVersion: { not: null },
+        ...(query.groupId === undefined ? {} : { skill: { groupId: query.groupId } }),
+      },
+      include: { skill: true },
+      orderBy: { updatedAt: 'desc' },
+    });
+    return adoptions.map((adoption) => ({
+      id: adoption.id,
+      sourceSkillId: adoption.skillId,
+      sourceName: adoption.skill.name,
+      adoptedVersion: adoption.adoptedVersion,
+      pendingVersion: adoption.pendingVersion,
+      currentDefinition: asRecord(adoption.adaptedDefinition),
+      pendingDefinition: asRecord(adoption.pendingDefinition),
+      lineage: { sourceSkillId: adoption.skillId, ownerUserId: adoption.skill.ownerUserId },
+    }));
+  });
+
+  app.post('/v1/skill-adoptions/:id/review', async (request) => {
+    const auth = await requireAuth(request, services.config);
+    const params = parseWith(idParamsSchema, request.params);
+    const body = parseWith(z.object({ decision: z.enum(['adopt', 'dismiss']) }), request.body);
+    const adoption = await services.db.skillAdoption.findFirst({
+      where: { id: params.id, userId: auth.id, deletedAt: null },
+    });
+    if (adoption?.pendingVersion === null || adoption?.pendingVersion === undefined)
+      throw new ApiError(404, 'SKILL_UPDATE_NOT_FOUND', 'That skill update is no longer pending.');
+    await services.db.skillAdoption.update({
+      where: { id: adoption.id },
+      data:
+        body.decision === 'adopt'
+          ? {
+              adaptedDefinition: (adoption.pendingDefinition ??
+                adoption.adaptedDefinition) as Prisma.InputJsonValue,
+              adoptedVersion: adoption.pendingVersion,
+              pendingDefinition: Prisma.JsonNull,
+              pendingVersion: null,
+              adoptedAt: new Date(),
+            }
+          : { pendingDefinition: Prisma.JsonNull, pendingVersion: null },
+    });
+    await logActivity(services.db, {
+      userId: auth.id,
+      actorType: 'USER',
+      action: `skill_update.${body.decision === 'adopt' ? 'adopted' : 'dismissed'}`,
+      targetType: 'SkillAdoption',
+      targetId: adoption.id,
+      payload: { sourceSkillId: adoption.skillId, pendingVersion: adoption.pendingVersion },
+      requestId: request.id,
+    });
+    return { ok: true, decision: body.decision };
   });
 
   app.get('/v1/groups', async (request) => {

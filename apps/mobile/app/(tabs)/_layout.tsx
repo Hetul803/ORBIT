@@ -1,7 +1,7 @@
 import { Tabs } from 'expo-router';
 import type { ReactNode } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { colors, Icon, type IconName } from '@orbit/ui';
+import { Icon, radii, Ring, spacing, type IconName, useOrbitTheme } from '@orbit/ui';
 
 const TabIcon = ({
   name,
@@ -11,24 +11,37 @@ const TabIcon = ({
   name: IconName;
   focused: boolean;
   ask?: boolean;
-}): ReactNode => (
-  <View style={[styles.icon, ask && styles.ask, focused && !ask && styles.focused]}>
-    <Icon
-      name={name}
-      size={ask ? 25 : 21}
-      color={ask ? colors.white : focused ? colors.ink : '#767168'}
-    />
-  </View>
-);
+}): ReactNode => {
+  const { colors } = useOrbitTheme();
+  return (
+    <View
+      style={[
+        styles.icon,
+        ask && styles.ask,
+        focused && !ask && { borderColor: colors.hairlineStrong, borderWidth: 1 },
+      ]}
+    >
+      {ask ? (
+        <Ring value={focused ? 1 : 0.7} tone="rented" size={47} seed="ask-tab" />
+      ) : (
+        <Icon name={name} size={21} color={focused ? colors.ink : colors.inkFaint} />
+      )}
+    </View>
+  );
+};
 
 export default function TabLayout(): ReactNode {
+  const { colors } = useOrbitTheme();
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: colors.ink,
-        tabBarInactiveTintColor: '#767168',
-        tabBarStyle: styles.bar,
+        tabBarInactiveTintColor: colors.inkFaint,
+        tabBarStyle: [
+          styles.bar,
+          { backgroundColor: colors.surface, borderTopColor: colors.hairline },
+        ],
         tabBarLabelStyle: styles.label,
       }}
     >
@@ -50,7 +63,7 @@ export default function TabLayout(): ReactNode {
         name="ask"
         options={{
           title: 'Ask',
-          tabBarIcon: ({ focused }) => <TabIcon name="spark" focused={focused} ask />,
+          tabBarIcon: ({ focused }) => <TabIcon name="search" focused={focused} ask />,
         }}
       />
       <Tabs.Screen
@@ -72,23 +85,14 @@ export default function TabLayout(): ReactNode {
 }
 
 const styles = StyleSheet.create({
-  bar: {
-    height: 86,
-    paddingTop: 9,
-    paddingBottom: 12,
-    backgroundColor: '#FFFCF5',
-    borderTopColor: '#D9D1C3',
-  },
+  bar: { height: spacing.xxl * 2, paddingTop: spacing.sm, paddingBottom: spacing.md },
   label: { fontFamily: 'InstrumentSans_600SemiBold', fontSize: 10 },
-  icon: { width: 34, height: 30, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
-  focused: { backgroundColor: '#E7E0D5' },
-  ask: {
-    width: 47,
-    height: 47,
-    borderRadius: 24,
-    backgroundColor: colors.ember,
-    marginTop: -17,
-    borderWidth: 4,
-    borderColor: '#FFFCF5',
+  icon: {
+    width: 34,
+    height: 30,
+    borderRadius: radii.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
+  ask: { width: 47, height: 47, borderRadius: radii.sm, marginTop: -spacing.lg },
 });

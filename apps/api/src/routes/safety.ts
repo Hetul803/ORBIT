@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 
-import { ConversationStatus, ReportStatus, UserStatus } from '@orbit/db';
+import { ConversationStatus, ReportStatus, UserStatus, queuePush } from '@orbit/db';
 import { blockSchema, reportSchema, safetyPlanSchema } from '@orbit/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -108,6 +108,13 @@ export const registerSafetyRoutes = (app: FastifyInstance, services: Services): 
       targetId: report.id,
       payload: { category: body.category },
       requestId: request.id,
+    });
+    await queuePush(services.db, {
+      userId: auth.id,
+      eventType: 'safety',
+      title: 'Safety report received',
+      body: 'Your report is in the moderation queue. Review the receipt in Activity.',
+      deepLink: 'orbit://activity',
     });
     return reply
       .code(201)
@@ -228,6 +235,10 @@ export const registerSafetyRoutes = (app: FastifyInstance, services: Services): 
         include: {
           reporter: { select: { id: true, displayName: true } },
           subject: { select: { id: true, displayName: true } },
+          actions: {
+            include: { moderator: { select: { id: true, displayName: true } } },
+            orderBy: { createdAt: 'asc' },
+          },
         },
         orderBy: { createdAt: 'asc' },
       }),
@@ -238,6 +249,31 @@ export const registerSafetyRoutes = (app: FastifyInstance, services: Services): 
       }),
     ]);
     return { reports, flaggedConversations };
+  });
+
+  app.get('/v1/admin/audit', async (request) => {
+    await requireAdmin(request, services.config);
+    const actions = await services.db.moderationAction.findMany({
+      include: {
+        moderator: { select: { id: true, displayName: true, role: true } },
+        report: { select: { id: true, category: true, subjectUserId: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+    return actions.map((action) => ({
+      id: action.id,
+      reportId: action.reportId,
+      action: action.action,
+      reason: action.reason,
+      moderator: {
+        id: action.moderator.id,
+        displayName: action.moderator.displayName,
+        role: action.moderator.role.toLowerCase(),
+      },
+      report: action.report,
+      createdAt: action.createdAt.toISOString(),
+    }));
   });
 
   app.post('/v1/admin/reports/:id/action', async (request) => {
@@ -345,7 +381,7 @@ export const registerSafetyRoutes = (app: FastifyInstance, services: Services): 
       retained,
     ] = await Promise.all([
       services.db.run.findFirst({
-        where: { kind: 'nightly_matching' },
+        where: { kind: { startsWith: 'nightly_' } },
         orderBy: { createdAt: 'desc' },
       }),
       services.db.agentConversation.count({ where: { createdAt: { gte: today } } }),

@@ -1,4 +1,4 @@
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useState, type ReactNode } from 'react';
 import { Button, Card, Screen } from '@orbit/ui';
 
@@ -6,6 +6,7 @@ import { api, jsonBody } from '@/api';
 import { AppHeader, ErrorText, Field, Notice } from '@/components';
 
 export default function NewSkill(): ReactNode {
+  const { groupId } = useLocalSearchParams<{ groupId?: string }>();
   const [name, setName] = useState('');
   const [trigger, setTrigger] = useState('');
   const [instruction, setInstruction] = useState('');
@@ -19,6 +20,7 @@ export default function NewSkill(): ReactNode {
         '/v1/skills',
         jsonBody({
           name,
+          ...(groupId === undefined ? {} : { groupId }),
           autonomyPct: 0,
           definition: {
             trigger,
@@ -49,8 +51,12 @@ export default function NewSkill(): ReactNode {
   return (
     <Screen>
       <AppHeader
-        title="Create a teachable skill"
-        subtitle="Start narrow. ORBIT expands autonomy only after validated runs."
+        title={groupId === undefined ? 'Create a teachable skill' : 'Publish a group skill'}
+        subtitle={
+          groupId === undefined
+            ? 'Start narrow. ORBIT expands autonomy only after validated runs.'
+            : 'Every member can adopt it. Future corrections arrive as reviewable versioned updates.'
+        }
       />
       <Notice
         title="Draft first"

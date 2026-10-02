@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 import { Button, Card, OrbitText, Pill, Screen } from '@orbit/ui';
 
 import { api, patchBody } from '@/api';
-import { AppHeader, Notice } from '@/components';
+import { AppHeader, Notice, QueryError } from '@/components';
 
 type TrustMode = 'ask_first' | 'do_and_tell' | 'just_handle_it';
 interface Agent {
@@ -16,12 +16,7 @@ const modes: TrustMode[] = ['ask_first', 'do_and_tell', 'just_handle_it'];
 export default function Trust(): ReactNode {
   const client = useQueryClient();
   const query = useQuery({ queryKey: ['agent'], queryFn: () => api<Agent>('/v1/agent') });
-  const defaults = query.data?.autonomyDefaults ?? {
-    introductions: 'ask_first',
-    external_messages: 'ask_first',
-    watchers: 'do_and_tell',
-    private_analysis: 'just_handle_it',
-  };
+  const defaults = query.data?.autonomyDefaults ?? {};
   const setMode = async (scope: string, mode: TrustMode): Promise<void> => {
     const previous = client.getQueryData<Agent>(['agent']);
     const next = { ...(previous?.autonomyDefaults ?? defaults), [scope]: mode };
@@ -43,20 +38,28 @@ export default function Trust(): ReactNode {
         detail="Messages, calendar edits, public posts, and commitments always require explicit approval, even if another dial is permissive."
         tone="ember"
       />
-      {Object.entries(defaults).map(([scope, current]) => (
-        <Card key={scope}>
-          <Pill>{scope.replaceAll('_', ' ').toUpperCase()}</Pill>
-          <OrbitText variant="title">{current.replaceAll('_', ' ')}</OrbitText>
-          {modes.map((mode) => (
-            <Button
-              key={mode}
-              label={mode.replaceAll('_', ' ')}
-              onPress={() => void setMode(scope, mode)}
-              kind={current === mode ? 'primary' : 'secondary'}
-            />
-          ))}
+      {query.isError ? (
+        <QueryError message={query.error.message} onRetry={() => void query.refetch()} />
+      ) : query.isPending ? (
+        <Card>
+          <OrbitText>Loading your saved trust defaults…</OrbitText>
         </Card>
-      ))}
+      ) : (
+        Object.entries(defaults).map(([scope, current]) => (
+          <Card key={scope}>
+            <Pill>{scope.replaceAll('_', ' ').toUpperCase()}</Pill>
+            <OrbitText variant="title">{current.replaceAll('_', ' ')}</OrbitText>
+            {modes.map((mode) => (
+              <Button
+                key={mode}
+                label={mode.replaceAll('_', ' ')}
+                onPress={() => void setMode(scope, mode)}
+                kind={current === mode ? 'primary' : 'secondary'}
+              />
+            ))}
+          </Card>
+        ))
+      )}
       <Button label="Back" onPress={() => router.back()} kind="quiet" />
     </Screen>
   );

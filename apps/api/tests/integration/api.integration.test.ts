@@ -1,4 +1,10 @@
-import { ConversationStatus, createPrismaClient, IntentKind, type PrismaClient } from '@orbit/db';
+import {
+  ConversationStatus,
+  createPrismaClient,
+  IntentKind,
+  queuePush,
+  type PrismaClient,
+} from '@orbit/db';
 import { configFromEnvironment, CostCapError, ModelRouter, StubProvider } from '@orbit/llm';
 import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
@@ -14,6 +20,7 @@ const config = loadConfig({
   ...process.env,
   NODE_ENV: 'test',
   OTP_DELIVERY_MODE: 'log',
+  ALLOW_DEVELOPMENT_OTP_DISPLAY: 'true',
   JWT_ACCESS_SECRET: 'integration-access-secret-at-least-32-characters',
   JWT_REFRESH_SECRET: 'integration-refresh-secret-at-least-32-characters',
   FIELD_ENCRYPTION_KEY: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
@@ -119,6 +126,119 @@ describe.runIf(enabled)('ORBIT API integration', () => {
     expect(response.statusCode).toBe(403);
     expect(response.json<{ error: { code: string } }>().error.code).toBe('AGE_RESTRICTED');
     expect(await db.ageGateAttempt.count({ where: { allowed: false } })).toBeGreaterThan(0);
+  });
+
+  it('rate-limits OTP abuse and does not enumerate whether an account exists', async () => {
+    const existing = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/otp/request',
+      payload: { email: 'demo@orbit.local' },
+      remoteAddress: `127.1.${String(Number.parseInt(testRunId.slice(0, 2), 16) % 250)}.1`,
+    });
+    const unknown = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/otp/request',
+      payload: { email: `unknown-${testRunId}@orbit.local` },
+      remoteAddress: `127.1.${String(Number.parseInt(testRunId.slice(2, 4), 16) % 250)}.2`,
+    });
+    expect(existing.statusCode).toBe(200);
+    expect(unknown.statusCode).toBe(200);
+    expect(Object.keys(existing.json<Record<string, unknown>>()).toSorted()).toEqual(
+      Object.keys(unknown.json<Record<string, unknown>>()).toSorted(),
+    );
+    expect(existing.json<Record<string, unknown>>()).not.toHaveProperty('accountExists');
+
+    const abusiveIp = `127.2.${String(Number.parseInt(testRunId.slice(4, 6), 16) % 250)}.9`;
+    const attempts = [];
+    for (let index = 0; index < 6; index += 1) {
+      attempts.push(
+        await app.inject({
+          method: 'POST',
+          url: '/v1/auth/otp/request',
+          payload: { email: `abuse-${testRunId}@orbit.local` },
+          remoteAddress: abusiveIp,
+        }),
+      );
+    }
+    expect(attempts.slice(0, 5).every((response) => response.statusCode === 200)).toBe(true);
+    expect(attempts[5]?.statusCode).toBe(429);
+  });
+
+  it('rate-limits phone OTP and supports honest Gmail and push capability states', async () => {
+    const tokens = await signIn(`device-${testRunId}@orbit.local`, 'Device Tester');
+    const headers = { authorization: `Bearer ${tokens.accessToken}` };
+    const gmail = await app.inject({ method: 'GET', url: '/v1/connections/gmail/status', headers });
+    expect(gmail.statusCode).toBe(200);
+    expect(gmail.json<{ available: boolean; connected: boolean }>()).toMatchObject({
+      available: false,
+      connected: false,
+    });
+    const gmailStart = await app.inject({
+      method: 'POST',
+      url: '/v1/connections/gmail/start',
+      headers,
+    });
+    expect(gmailStart.statusCode).toBe(503);
+    expect(gmailStart.json<{ error: { code: string } }>().error.code).toBe('GMAIL_NOT_CONFIGURED');
+
+    const pushToken = `ExponentPushToken[integration_${testRunId}]`;
+    const registered = await app.inject({
+      method: 'POST',
+      url: '/v1/push/register',
+      headers,
+      payload: {
+        pushToken,
+        platform: 'ios',
+        preferences: { brief: true, reveal: true, approval: true, watcher: true, safety: true },
+      },
+    });
+    expect(registered.statusCode).toBe(201);
+    const deviceId = registered.json<{ id: string }>().id;
+    const preferences = await app.inject({
+      method: 'PATCH',
+      url: `/v1/push/devices/${deviceId}/preferences`,
+      headers,
+      payload: { brief: false, reveal: true, approval: true, watcher: true, safety: true },
+    });
+    expect(preferences.statusCode).toBe(200);
+    expect(preferences.json<{ preferences: { brief: boolean } }>().preferences.brief).toBe(false);
+    const deviceUser = await db.user.findUniqueOrThrow({
+      where: { email: `device-${testRunId}@orbit.local` },
+    });
+    expect(
+      await queuePush(db, {
+        userId: deviceUser.id,
+        eventType: 'brief',
+        title: 'Brief',
+        body: 'Ready',
+        deepLink: 'orbit://today',
+      }),
+    ).toBe(0);
+    expect(
+      await queuePush(db, {
+        userId: deviceUser.id,
+        eventType: 'watcher',
+        title: 'Watcher',
+        body: 'Matched',
+        deepLink: 'orbit://watchers',
+      }),
+    ).toBe(1);
+
+    const phoneIp = `127.3.${String(Number.parseInt(testRunId.slice(6, 8), 16) % 250)}.8`;
+    const phoneAttempts = [];
+    for (let index = 0; index < 6; index += 1) {
+      phoneAttempts.push(
+        await app.inject({
+          method: 'POST',
+          url: '/v1/auth/verify-phone/request',
+          headers,
+          payload: { phone: `+1312555${String(2000 + index).padStart(4, '0')}` },
+          remoteAddress: phoneIp,
+        }),
+      );
+    }
+    expect(phoneAttempts.slice(0, 5).every((response) => response.statusCode === 200)).toBe(true);
+    expect(phoneAttempts[5]?.statusCode).toBe(429);
   });
 
   it('serves the brief and signed export only to an authenticated user', async () => {

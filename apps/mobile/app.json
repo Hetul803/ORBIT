@@ -5,7 +5,7 @@
     "version": "0.1.0",
     "orientation": "portrait",
     "scheme": "orbit",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
@@ -14,7 +14,7 @@
     "android": {
       "package": "com.orbit.companion",
       "adaptiveIcon": {
-        "backgroundColor": "#F6F2E9"
+        "backgroundColor": "#F7F5F0"
       }
     },
     "web": {
@@ -25,10 +25,11 @@
       "expo-router",
       "expo-secure-store",
       "expo-document-picker",
+      "expo-notifications",
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#F6F2E9"
+          "backgroundColor": "#F7F5F0"
         }
       ]
     ],

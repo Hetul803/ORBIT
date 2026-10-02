@@ -1,4 +1,4 @@
-import { RevealDecision, type IntentKind } from '@orbit/db';
+import { RevealDecision, queuePush, type IntentKind } from '@orbit/db';
 import {
   introductionDecisionSchema,
   introductionOutcomeSchema,
@@ -286,6 +286,19 @@ export const registerSocialRoutes = (app: FastifyInstance, services: Services): 
       where: { id: params.id },
       include: introductionInclude,
     });
+    if (fresh.revealedAt !== null) {
+      await Promise.all(
+        [fresh.userAId, fresh.userBId].map((userId) =>
+          queuePush(services.db, {
+            userId,
+            eventType: 'reveal',
+            title: 'Your introduction is mutually revealed',
+            body: 'Open ORBIT to see the fields you both approved.',
+            deepLink: `orbit://introduction/${fresh.id}`,
+          }),
+        ),
+      );
+    }
     return introductionDto(fresh, auth.id);
   });
 
@@ -339,6 +352,7 @@ export const registerSocialRoutes = (app: FastifyInstance, services: Services): 
         have: proposal.haveItem,
         want: proposal.wantItem,
         terms: asRecord(proposal.terms),
+        negotiation: Array.isArray(proposal.negotiation) ? proposal.negotiation : [],
         myDecision:
           myDecision === RevealDecision.REVEAL
             ? 'accepted'

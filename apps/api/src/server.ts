@@ -1,9 +1,13 @@
 import { createPrismaClient } from '@orbit/db';
+import * as Sentry from '@sentry/node';
 
 import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
 
 const config = loadConfig();
+if (config.SENTRY_DSN !== undefined) {
+  Sentry.init({ dsn: config.SENTRY_DSN, environment: config.SENTRY_ENVIRONMENT });
+}
 const db = createPrismaClient(config.DATABASE_URL);
 const app = await buildApp(db, config);
 

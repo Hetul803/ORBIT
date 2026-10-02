@@ -2,12 +2,16 @@ import { z } from 'zod';
 
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  SENTRY_DSN: z.url().optional(),
+  SENTRY_ENVIRONMENT: z.string().default('development'),
   REDIS_URL: z.string().default('redis://localhost:6379'),
   LLM_DEFAULT_PROVIDER: z.enum(['stub', 'openai', 'anthropic', 'google']).default('stub'),
   OPENAI_API_KEY: z.string().optional(),
   ANTHROPIC_API_KEY: z.string().optional(),
   GOOGLE_GENERATIVE_AI_API_KEY: z.string().optional(),
   FIELD_ENCRYPTION_KEY: z.string().default('AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='),
+  SEARCH_API_ENDPOINT: z.url().default('https://api.search.brave.com/res/v1/web/search'),
+  SEARCH_API_KEY: z.string().optional(),
   USER_DAILY_COST_CAP_CENTS: z.coerce.number().nonnegative().default(35),
   GLOBAL_DAILY_COST_CAP_CENTS: z.coerce.number().nonnegative().default(2_500),
   INTRODUCTIONS_PER_USER_PER_DAY: z.coerce.number().int().positive().default(12),
@@ -17,6 +21,7 @@ const schema = z.object({
   WATCHER_TICK_CRON: z.string().default('*/15 * * * *'),
   CONSOLIDATION_CRON: z.string().default('30 4 * * *'),
   DELETION_CRON: z.string().default('0 4 * * *'),
+  PUSH_TICK_CRON: z.string().default('* * * * *'),
 });
 
 export type WorkerConfig = z.infer<typeof schema>;

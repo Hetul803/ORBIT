@@ -12,13 +12,17 @@
     "test:coverage": "vitest run --coverage --passWithNoTests --exclude 'dist/**'",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/src/index.js",
-    "once": "RUN_WORKER_ONCE=true tsx src/index.ts"
+    "once": "RUN_WORKER_ONCE=true tsx src/index.ts",
+    "eval:reranker": "tsx scripts/evaluate-reranker.ts",
+    "benchmark:retrieval": "tsx scripts/benchmark-retrieval.ts",
+    "smoke:web-watcher": "tsx scripts/smoke-public-watcher.ts"
   },
   "dependencies": {
     "@orbit/agent": "workspace:*",
     "@orbit/db": "workspace:*",
     "@orbit/llm": "workspace:*",
     "@orbit/shared": "workspace:*",
+    "@sentry/node": "^11.1.0",
     "bullmq": "6.3.10",
     "cron-parser": "5.10.1",
     "ioredis": "6.0.0",

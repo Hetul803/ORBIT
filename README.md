@@ -1,36 +1,34 @@
 # ORBIT
 
-## What ORBIT is
+ORBIT is a private agent network: each person owns a persistent representative that learns from explicit answers and corrections, finds useful people and opportunities, and asks before anything leaves the user's private space. The defensible core is an ORVIN-inspired, user-owned graph of versioned memories, skills, validation evidence, outcome feedback, lineage, and receipts—not a feed or a generic chat wrapper.
 
-ORBIT is a private agent network where a persistent representative learns how you think, finds useful people and opportunities, and brings you only decisions that deserve your attention. It combines consent-gated introductions, exchange matching, an agent inbox, watchers, auditable task runs, and teach-once reusable skills in one calm mobile product. Its defensibility comes from a user-owned, versioned skill-and-memory graph whose validated procedures improve with corrections while unfamiliar steps still fall back to stronger general reasoning.
+This repository contains an Expo iOS/Android/web app, a Fastify API, PostgreSQL with pgvector, Redis/BullMQ workers, a provider-independent LLM router, public-web watchers, read-only Gmail OAuth, Expo push delivery, production email/SMS OTP adapters, export verification, and private-staging deployment assets.
 
-The repository is a production-shaped TypeScript monorepo: an Expo iOS/Android/web client, Fastify API, BullMQ workers, PostgreSQL with pgvector, Redis, MinIO-compatible storage, and provider-independent LLM routing. It runs without paid keys through deterministic local providers; add provider credentials later without changing application code.
+The app never substitutes demo records for failed or empty API responses. External capabilities are visibly unavailable until their credentials and feature flags are configured.
 
-## Product surfaces
+## Current product
 
-| Surface                | What the user can do                                                                                                                                      |
-| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Sign in                | Request and verify an email OTP, pass the hard 18+ gate, refresh a session, and optionally verify phone or `.edu` identity.                               |
-| Agent setup            | Name a persistent agent, complete the six-turn interview by text, calibrate its voice, and choose trust defaults.                                         |
-| History import         | Import a ChatGPT or Claude JSON/ZIP, review extracted durable facts, retain no raw archive, and delete or correct memory later.                           |
-| Today                  | Read a cached daily brief of completed work, live runs, watcher hits, introductions, receipts, and decisions needing attention.                           |
-| Circle                 | Browse consent-safe introductions using a virtualized list, open verdicts and redacted transcripts, then reveal or decline.                               |
-| Ask                    | Describe a goal in natural language, inspect the interpreted action, select autonomy, and create an intent, watcher, or task.                             |
-| Skills                 | Inspect, create, edit, share, and adopt versioned reusable procedures with confidence, validation evidence, permissions, fallback, and learning receipts. |
-| You                    | Manage identity, memory, trust, verification, activity, connections, groups, exchange, safety, export, deletion, notifications, and BYOK keys.            |
-| Introduction detail    | Read the independent verdict and redacted agent transcript; mutual field-level consent is required before either identity is exposed.                     |
-| Inbox                  | Review requests triaged by screening rules, edit an agent-drafted reply, and explicitly approve or decline sending.                                       |
-| Watchers               | Create scheduled monitors, pause them, inspect deduplicated hits, and see the next run.                                                                   |
-| Runs                   | Inspect each step, duration, cost, approval boundary, result, and first-run-versus-current learning receipt.                                              |
-| Exchange               | Post wants/haves, receive agent-negotiated proposal cards, mutually accept, and arrange a public handoff; ORBIT handles no money and charges no fee.      |
-| Groups and skill shelf | Join a campus, club, lab, or class by code and adopt shared skills into a private, editable copy.                                                         |
-| Safety                 | Block or mute another user, report content, create a shareable check-in plan, and review the append-only activity trail.                                  |
+| Surface     | Working behavior                                                                                                                                                                             |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Identity    | Email OTP, hard 18+ account gate, rotating refresh tokens, optional `.edu` and phone verification, enumeration-resistant responses, abuse limits.                                            |
+| Agent setup | Blank-account interview; bounded model-generated follow-ups when a provider is configured, explicit bounded local sequence otherwise; agent naming only after the interview.                 |
+| Memory      | ChatGPT/Claude JSON or ZIP import without retaining the archive; inspect, correct, delete, and re-embed durable facts.                                                                       |
+| Today       | Real brief data, runs, watcher hits, introductions, and approvals; honest loading, empty, and error behavior.                                                                                |
+| Circle      | pgvector candidate retrieval, outcome-conditioned reranking, redacted transcripts, independent verdict, mutual field-intersection reveal, and outcomes.                                      |
+| Ask         | Natural-language intent/watcher/task interpretation, functional example pills, and explicit autonomy selection.                                                                              |
+| Intents     | Dedicated controls for all intent kinds, parameters, pause-until, and activity.                                                                                                              |
+| Watchers    | Confirmed natural-language specs; public URL, HTML/JSON/JSON-LD, RSS/Atom, and configured search API sources; robots/SSRF/size/timeout/per-host protections; deduplicated change-aware hits. |
+| Gmail       | Feature-gated, read-only OAuth using `gmail.readonly`, encrypted refresh tokens, revoke/disconnect, last-10-message sync, triage, editable drafts, and audit receipts.                       |
+| Skills      | Versioned creation/correction, validation evidence, lineage, share/adopt flow, group shelves, and reviewable propagation updates.                                                            |
+| Exchange    | Complete have/want form, edit/delete, condition/urgency/cash range/trade preference, agent negotiation transcript, mutual approval, and no-money handoff notice.                             |
+| Safety      | Block, mute, report, moderation queue, role enforcement, safety plans, check-ins, due reminders, and append-only activity.                                                                   |
+| Settings    | Push registration/preferences, encrypted BYOK credentials, signed export, seven-day deletion countdown/cancel, and destructive confirmations.                                                |
 
-The Expo router also supplies focused screens for new/edit skill, new watcher, new exchange item, connection status, verification, memory, trust controls, activity, and settings. Every network GET can return cached data when offline; mutation screens show explicit pending/error states and do not pretend that server work succeeded.
+See [Pass 2 verification](docs/PASS2_VERIFICATION.md) for exact test evidence, limitations, and launch readiness. [Provider setup and 100-user costs](docs/PROVIDER_SETUP_AND_COSTS.md) lists every external credential, setup order, current official price reference, and the beta unit-economics model.
 
 ## Start locally
 
-Prerequisites: Docker Desktop, Node.js 22.13 or newer, pnpm 11, and Xcode or Android Studio for a native simulator.
+Prerequisites: Docker Desktop, Node.js 22.13 or newer, and pnpm 11.
 
 ```bash
 git clone https://github.com/Hetul803/ORBIT.git
@@ -42,108 +40,127 @@ pnpm install --frozen-lockfile
 docker compose -f infra/docker-compose.yml up --build
 ```
 
-That one Compose command migrates and seeds PostgreSQL, then starts Postgres, Redis, MinIO, the API on `http://localhost:4100`, and the recurring worker. The demo account is `demo@orbit.local`; development OTP codes are returned by the request endpoint, and the seed also contains 40 clearly fictional users.
+The local Compose stack starts PostgreSQL/pgvector on 5432, Redis, MinIO, the API on `http://localhost:4100`, and the worker. It applies migrations and may seed only when the explicit local seed configuration is enabled. Production and staging must never seed.
 
-In another terminal, start the app:
+Start Expo separately:
 
 ```bash
 pnpm mobile
 ```
 
-Press `i` for iOS, `a` for Android, or `w` for web. For Android Emulator networking, set `EXPO_PUBLIC_API_URL=http://10.0.2.2:4100` and `EXPO_PUBLIC_WS_URL=ws://10.0.2.2:4100/v1/stream`; an iOS simulator can use `localhost`.
+Press `w` for web. Native development requires Xcode for iOS or Android Studio/ADB for Android.
 
-Useful operations:
+Development OTP display is intentionally off by default. To show a local code in the app, start the API with the explicit flag:
 
 ```bash
-# Trigger watchers, consolidation, deletion processing, nightly matching, and brief generation once.
-pnpm worker:once
+ALLOW_DEVELOPMENT_OTP_DISPLAY=true OTP_DELIVERY_MODE=log pnpm api
+```
 
-# Run the same static gates used by CI.
+Never set that flag in staging or production. In production, log-mode email or phone delivery fails closed.
+
+## API URL on all four development targets
+
+Every request uses the single `EXPO_PUBLIC_API_URL` resolver in `apps/mobile/src/api-url.ts`. An explicit value always wins; production builds fail closed when it is absent.
+
+| Target                      | Configuration                                   | Notes                                                                                                                                                      |
+| --------------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Web                         | `EXPO_PUBLIC_API_URL=http://localhost:4100`     | The development fallback also derives the browser host and port 4100.                                                                                      |
+| iOS Simulator               | `EXPO_PUBLIC_API_URL=http://localhost:4100`     | The simulator can reach the Mac loopback address.                                                                                                          |
+| Android Emulator            | `EXPO_PUBLIC_API_URL=http://10.0.2.2:4100`      | `10.0.2.2` maps to the development machine.                                                                                                                |
+| Physical iOS/Android device | `EXPO_PUBLIC_API_URL=http://<YOUR-LAN-IP>:4100` | Phone and computer must share a network; allow port 4100 through the firewall. Expo can derive its development host, but an explicit value is recommended. |
+
+Set `EXPO_PUBLIC_WS_URL` to the same host with `ws://` and `/v1/stream`, for example `ws://10.0.2.2:4100/v1/stream`. Production must use HTTPS/WSS.
+
+## Configuration
+
+Copy `.env.example`. Keys are never committed.
+
+| Capability            | Required variables                                                                                                                                                                              |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Core                  | `DATABASE_URL`, `REDIS_URL`, `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `FIELD_ENCRYPTION_KEY`, `EXPORT_SIGNING_SECRET`                                                                         |
+| Email OTP             | `OTP_DELIVERY_MODE=resend`, `RESEND_API_KEY`, `RESEND_FROM_EMAIL` on a verified domain                                                                                                          |
+| SMS OTP               | `PHONE_OTP_PROVIDER=twilio`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_PHONE`                                                                                                     |
+| Gmail                 | `GMAIL_INTEGRATION_ENABLED=true`, Google OAuth client ID/secret, callback URI, and mobile redirect URI                                                                                          |
+| LLM and embeddings    | `LLM_DEFAULT_PROVIDER`, model IDs, explicit per-million-token cost metadata, and the selected provider key; real memory vectors currently require `OPENAI_API_KEY` and `OPENAI_EMBEDDING_MODEL` |
+| Search-query watchers | `SEARCH_API_ENDPOINT` and `SEARCH_API_KEY`; direct URL/RSS/JSON watchers need no key                                                                                                            |
+| Push                  | `EXPO_PUBLIC_EAS_PROJECT_ID`; worker delivery uses the Expo push service                                                                                                                        |
+| Monitoring            | `SENTRY_DSN`, `SENTRY_ENVIRONMENT`                                                                                                                                                              |
+| Mobile networking     | `EXPO_PUBLIC_API_URL`, `EXPO_PUBLIC_WS_URL`                                                                                                                                                     |
+
+Without provider keys:
+
+- direct public URL/RSS/JSON watchers work;
+- interview uses the visibly labelled bounded local sequence;
+- Gmail and search-query watchers are visibly unavailable;
+- no fake embeddings are written;
+- remote push cannot register on web or a simulator;
+- Resend and Twilio delivery are unavailable, while explicit development OTP display can be enabled locally.
+
+## Verification commands
+
+```bash
 pnpm format:check
 pnpm lint
 pnpm typecheck
+pnpm test
 pnpm test:coverage
-
-# Verify the production web bundle and native project generation.
-pnpm --filter @orbit/mobile build
-pnpm --filter @orbit/mobile exec expo prebuild --no-install --platform android
-pnpm --filter @orbit/mobile exec expo prebuild --no-install --platform ios
+pnpm build
+pnpm benchmark:retrieval
+pnpm eval:reranker
+pnpm smoke:web-watcher
+pnpm verify:export -- ./orbit-export.zip
 ```
 
-To run services outside Docker, start only the dependencies, then migrate, seed, and launch processes:
+The test suite uses a real PostgreSQL/pgvector database for API and worker integration tests. `smoke:web-watcher` fetches a real public HTML product page inside a rollback transaction, so it leaves no fixture rows.
+
+## Private staging
+
+`infra/staging/deploy.sh` is the one-command release entry point for a pre-provisioned private host. It reads JSON secrets from AWS Secrets Manager, requires TLS PostgreSQL and Redis URLs, builds API/worker/migration images, runs migrations, starts Caddy with automatic TLS, and health-checks `/ready`.
 
 ```bash
-docker compose -f infra/docker-compose.yml up -d postgres redis minio
-pnpm db:generate
-pnpm --filter @orbit/db migrate:deploy
-pnpm db:seed
-pnpm api
-pnpm worker
+ORBIT_STAGING_SECRET_ID=orbit/staging \
+STAGING_DOMAIN=staging.example.com \
+./infra/staging/deploy.sh
 ```
 
-## Environment
+The host, DNS, managed PostgreSQL/pgvector, managed Redis, AWS permissions, provider accounts, and mobile builds must be provisioned by the owner before this command can produce a public staging URL. See [Operations runbook](docs/RUNBOOK.md).
 
-Copy `.env.example`; the stub model provider and log-mode OTP require no external keys.
-
-| Variable                                                                         | Purpose and source                                                                                                                             |
-| -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DATABASE_URL`, `REDIS_URL`                                                      | Created by local Compose; use managed PostgreSQL/pgvector and Redis URLs in production.                                                        |
-| `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `EXPORT_SIGNING_SECRET`               | Generate independent random secrets, for example with `openssl rand -base64 48`.                                                               |
-| `FIELD_ENCRYPTION_KEY`                                                           | Exactly 32 random bytes encoded as base64: `openssl rand -base64 32`; encrypts BYOK credentials.                                               |
-| `RESEND_API_KEY`, `RESEND_FROM_EMAIL`                                            | Optional production email OTP delivery from a verified [Resend](https://resend.com/) account.                                                  |
-| `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`            | Optional platform keys from the respective provider; user BYOK values can instead be stored in Settings.                                       |
-| `LLM_DEFAULT_PROVIDER`, `LLM_MODEL_*`, `LLM_CHEAP_FALLBACK_MODEL`                | Choose the provider and model independently for interview, conversation, rerank, judge, draft, redaction, embeddings, skills, and Ask routing. |
-| `USER_DAILY_COST_CAP_CENTS`, `GLOBAL_DAILY_COST_CAP_CENTS`                       | Hard pre-call spending stops, recorded against the real model-call ledger.                                                                     |
-| `S3_*`                                                                           | Local values point to MinIO; replace with an S3-compatible object-store endpoint and credentials.                                              |
-| `EXPO_PUBLIC_API_URL`, `EXPO_PUBLIC_WS_URL`                                      | API and authenticated realtime stream URLs compiled into the mobile client.                                                                    |
-| `NIGHTLY_MATCH_CRON`, `WATCHER_TICK_CRON`, `CONSOLIDATION_CRON`, `DELETION_CRON` | BullMQ schedules using standard cron expressions.                                                                                              |
-| `ADMIN_EMAILS`, `INTRODUCTIONS_PER_USER_PER_DAY`, `DELETION_GRACE_DAYS`          | Operational policy controls.                                                                                                                   |
-
-Never commit `.env`; production must replace every development secret and disable development seeding.
-
-## Architecture
+## Architecture and safety
 
 ```text
-Expo Router app (iOS / Android / web)
-  ├─ secure token storage + offline GET cache
-  ├─ REST ──────────────────────────────┐
-  └─ authenticated WebSocket events ────┤
-                                        ▼
-Fastify API ── shared Zod contracts ── PostgreSQL 16 + pgvector
-  │   ├─ OTP/JWT, age gate, consent, safety, export/deletion
-  │   └─ append-only activity and per-call cost ledger
-  │
-  └─ provider-independent ModelRouter
-      ├─ per-task models + encrypted user BYOK
-      └─ retry → circuit breaker → deterministic safe fallback
-
-Redis/BullMQ scheduler
-  └─ workers: candidate filtering → rerank → bounded agent dialogue
-       → two-pass redaction → independent judge → introduction/brief
-       ├─ watchers + exchange proposal matching
-       ├─ memory consolidation
-       └─ ORVIN backbone: validated skill versions, correction evidence,
-          confidence routing, fallback, and learning receipts
+Expo app (iOS / Android / web)
+  ├─ secure tokens + TanStack Query
+  ├─ REST ───────────────────────────┐
+  └─ authenticated WebSocket events ┤
+                                     ▼
+Fastify API ── Zod contracts ── PostgreSQL 16 + pgvector
+  ├─ identity, consent, safety, Gmail, export/deletion
+  ├─ append-only activity + per-call cost ledger
+  └─ provider router + encrypted user BYOK
+                                     │
+Redis/BullMQ workers                 │
+  ├─ pgvector retrieval → rerank → bounded agent dialogue
+  ├─ two-pass redaction → independent verdict → brief
+  ├─ public-web watchers + exchange proposals + push
+  └─ ORVIN backbone: versioned skills, evidence, lineage,
+     corrections, confidence routing, outcomes, and receipts
 ```
 
-See [Architecture](docs/ARCHITECTURE.md), [Safety](docs/SAFETY.md), [API](docs/API.md), and the [Runbook](docs/RUNBOOK.md).
+Additional documentation: [Architecture](docs/ARCHITECTURE.md), [API](docs/API.md), [Safety](docs/SAFETY.md), [Export verification](docs/EXPORT_VERIFICATION.md), [provider setup and 100-user costs](docs/PROVIDER_SETUP_AND_COSTS.md), and [Pass 2 verification](docs/PASS2_VERIFICATION.md).
 
-## Testing and safety guarantees
+## Known external validation gates
 
-Vitest covers the agent pipeline above the required 80% threshold, adversarial PII redaction, malformed model outputs, provider fallback, and BYOK isolation. GitHub Actions uses real PostgreSQL/pgvector and Redis service containers to prove age gating, authenticated export, nightly matching, mutually independent reveal decisions, hidden redaction failures, watcher deduplication, and database-backed cost caps; Maestro describes the mobile signup-to-reveal journey in `apps/mobile/.maestro`.
+The implementations exist, but these outcomes cannot be truthfully called production-validated until owner-supplied accounts or hardware are available:
 
-## Deliberately not built yet
+- verified Resend sending domain and Twilio number;
+- verified Google OAuth application and live Gmail account;
+- Expo EAS project and physical iOS/Android devices;
+- production LLM/embedding and search API keys;
+- managed staging infrastructure, DNS, and secret-manager access;
+- App Store/Play Store signing and distribution;
+- hosted GitHub Actions after the repository account/billing restriction is cleared.
 
-These need external accounts, legal/product decisions, or distribution authority and therefore have working local boundaries but not fabricated integrations:
-
-- Native speech-to-text for the optional voice interview; text interview and the `inputMode` contract work today.
-- Production SMS delivery; development phone OTP and the verification state machine work today.
-- Google/Microsoft/IMAP connection authorization and write adapters; encrypted connection records, scopes, status, and the connection UI exist.
-- Remote push delivery; in-app realtime events and local notification preferences exist.
-- App Store and Play Store signing, compliance forms, and release submission; iOS/Android projects generate successfully.
-- Production object uploads; MinIO/S3 infrastructure is present, while history imports are intentionally parsed in memory and never retained.
-
-Each item is represented by a GitHub issue in the public backlog.
+Each incomplete validation item is tracked in GitHub and detailed in `docs/PASS2_VERIFICATION.md`.
 
 ## License
 

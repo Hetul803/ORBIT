@@ -68,4 +68,6 @@ export interface CurrentUser {
   eduVerifiedAt: string | null;
   phoneVerifiedAt: string | null;
   status: string;
+  deletionRequestedAt: string | null;
+  role: 'user' | 'moderator' | 'admin';
 }

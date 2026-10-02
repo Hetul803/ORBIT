@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { CostCapError, ModelRouter } from '../src/router.js';
+import { configFromEnvironment, CostCapError, ModelRouter } from '../src/router.js';
 import { StubProvider } from '../src/providers.js';
 import type { CostLedger, LlmProvider, ModelCallRecord, ModelRouterConfig } from '../src/types.js';
 
@@ -118,6 +118,28 @@ const request = {
 };
 
 describe('provider router', () => {
+  it('loads auditable generic and per-task model prices from the environment', () => {
+    const loaded = configFromEnvironment({
+      LLM_DEFAULT_PROVIDER: 'openai',
+      LLM_INPUT_COST_CENTS_PER_MILLION_TOKENS: '20',
+      LLM_OUTPUT_COST_CENTS_PER_MILLION_TOKENS: '120',
+      LLM_COST_INTERVIEW_INPUT_CENTS_PER_MILLION_TOKENS: '',
+      LLM_COST_JUDGE_INPUT_CENTS_PER_MILLION_TOKENS: '200',
+      LLM_COST_JUDGE_OUTPUT_CENTS_PER_MILLION_TOKENS: '1200',
+    });
+
+    expect(loaded.tasks.interview.inputCostPerMillionTokens).toBe(20);
+    expect(loaded.tasks.interview.outputCostPerMillionTokens).toBe(120);
+    expect(loaded.tasks.judge.inputCostPerMillionTokens).toBe(200);
+    expect(loaded.tasks.judge.outputCostPerMillionTokens).toBe(1200);
+  });
+
+  it('rejects a paid provider without explicit pricing metadata', () => {
+    expect(() => configFromEnvironment({ LLM_DEFAULT_PROVIDER: 'openai' })).toThrow(
+      'LLM_INPUT_COST_CENTS_PER_MILLION_TOKENS',
+    );
+  });
+
   it('falls back and records an auditable call', async () => {
     const ledger = new Ledger();
     const router = new ModelRouter(config, new Map([['stub', new StubProvider()]]), ledger);

@@ -1,7 +1,7 @@
 import { router } from 'expo-router';
 import { useState, type ReactNode } from 'react';
 import { KeyboardAvoidingView, Platform, StyleSheet, View } from 'react-native';
-import { Button, Card, colors, OrbitText, Screen, spacing } from '@orbit/ui';
+import { Button, Card, OrbitText, Screen, spacing } from '@orbit/ui';
 
 import { api, ApiRequestError, jsonBody } from '@/api';
 import { ErrorText, Field, Notice, Wordmark } from '@/components';
@@ -20,10 +20,10 @@ interface OtpVerifyResponse {
 export default function SignIn(): ReactNode {
   const setTokens = useAuthStore((state) => state.setTokens);
   const [step, setStep] = useState<'email' | 'code'>('email');
-  const [email, setEmail] = useState('demo@orbit.local');
-  const [displayName, setDisplayName] = useState('Demo Founder');
-  const [dateOfBirth, setDateOfBirth] = useState('2000-01-01');
-  const [code, setCode] = useState('424242');
+  const [email, setEmail] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [dateOfBirth, setDateOfBirth] = useState('');
+  const [code, setCode] = useState('');
   const [developmentCode, setDevelopmentCode] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -152,5 +152,5 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   content: { minHeight: '100%', justifyContent: 'space-between', paddingTop: spacing.xl },
   hero: { gap: spacing.lg, paddingVertical: spacing.xl },
-  privacy: { textAlign: 'center', color: colors.inkSoft },
+  privacy: { textAlign: 'center' },
 });

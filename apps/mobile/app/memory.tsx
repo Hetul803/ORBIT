@@ -4,7 +4,7 @@ import { useState, type ReactNode } from 'react';
 import { Button, Card, OrbitText, Pill, Screen } from '@orbit/ui';
 
 import { api, patchBody } from '@/api';
-import { AppHeader, Field, Notice } from '@/components';
+import { AppHeader, EmptyState, Field, Notice, QueryError } from '@/components';
 
 interface MemoryFact {
   id: string;
@@ -80,9 +80,16 @@ export default function Memory(): ReactNode {
         detail="A fact you edit is marked as user-authored and consolidation will not silently replace it."
         tone="moss"
       />
-      {(query.data ?? []).map((fact) => (
-        <Fact key={fact.id} fact={fact} />
-      ))}
+      {query.isError ? (
+        <QueryError message={query.error.message} onRetry={() => void query.refetch()} />
+      ) : query.data?.length === 0 ? (
+        <EmptyState
+          title="No durable memory yet."
+          detail="Interview answers and approved imports will appear here."
+        />
+      ) : (
+        (query.data ?? []).map((fact) => <Fact key={fact.id} fact={fact} />)
+      )}
       <Button label="Back" onPress={() => router.back()} kind="secondary" />
     </Screen>
   );

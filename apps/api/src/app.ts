@@ -8,6 +8,7 @@ import rateLimit from '@fastify/rate-limit';
 import sensible from '@fastify/sensible';
 import websocket from '@fastify/websocket';
 import type { PrismaClient } from '@orbit/db';
+import * as Sentry from '@sentry/node';
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import { z } from 'zod';
 
@@ -16,6 +17,8 @@ import type { ApiConfig } from './config.js';
 import { ApiError } from './errors.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerCoreRoutes } from './routes/core.js';
+import { registerGmailRoutes } from './routes/gmail.js';
+import { registerPushRoutes } from './routes/push.js';
 import { registerSafetyRoutes } from './routes/safety.js';
 import { registerSocialRoutes } from './routes/social.js';
 import { registerWorkRoutes } from './routes/work.js';
@@ -123,6 +126,8 @@ export const buildApp = async (db: PrismaClient, config: ApiConfig): Promise<Fas
 
   registerAuthRoutes(app, services);
   registerCoreRoutes(app, services);
+  registerGmailRoutes(app, services);
+  registerPushRoutes(app, services);
   registerSocialRoutes(app, services);
   registerWorkRoutes(app, services);
   registerSafetyRoutes(app, services);
@@ -156,7 +161,26 @@ export const buildApp = async (db: PrismaClient, config: ApiConfig): Promise<Fas
         },
       });
     }
+    const statusCode =
+      typeof error === 'object' &&
+      error !== null &&
+      'statusCode' in error &&
+      typeof error.statusCode === 'number'
+        ? error.statusCode
+        : undefined;
+    if (statusCode === 429) {
+      return reply.code(429).send({
+        error: {
+          code: 'RATE_LIMITED',
+          message: 'Too many requests. Wait before trying again.',
+          requestId: request.id,
+        },
+      });
+    }
     request.log.error({ err: error, requestId: request.id }, 'unhandled request error');
+    if (config.SENTRY_DSN !== undefined) {
+      Sentry.captureException(error, { tags: { requestId: request.id } });
+    }
     return reply.code(500).send({
       error: {
         code: 'INTERNAL_ERROR',

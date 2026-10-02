@@ -290,7 +290,9 @@ export const upsertScreeningRuleSchema = screeningRuleSchema.omit({
 
 export const watcherSpecSchema = z.object({
   query: z.string().min(1),
-  source: z.enum(['orbit', 'email', 'calendar', 'files', 'manual']),
+  source: z.enum(['orbit', 'web', 'email', 'calendar', 'files', 'manual']),
+  url: z.url().optional(),
+  format: z.enum(['auto', 'html', 'rss', 'atom', 'json', 'search_api']).default('auto'),
   constraints: z.record(z.string(), z.unknown()).default({}),
   notifyOn: z.string().default('new match'),
 });
@@ -399,6 +401,7 @@ export const skillSchema = z.object({
 
 export const createSkillSchema = z.object({
   name: z.string().trim().min(1).max(120),
+  groupId: idSchema.optional(),
   definition: skillDefinitionSchema,
   autonomyPct: z.number().int().min(0).max(100).default(0),
 });

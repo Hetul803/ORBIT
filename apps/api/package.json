@@ -12,7 +12,8 @@
     "test:integration": "vitest run tests/integration --exclude 'dist/**'",
     "test:coverage": "vitest run --coverage --exclude 'dist/**'",
     "dev": "tsx watch src/server.ts",
-    "start": "node dist/src/server.js"
+    "start": "node dist/src/server.js",
+    "verify:export": "tsx scripts/verify-export.ts"
   },
   "dependencies": {
     "@fastify/cors": "11.3.0",
@@ -21,11 +22,12 @@
     "@fastify/rate-limit": "11.2.0",
     "@fastify/sensible": "6.0.6",
     "@fastify/websocket": "11.3.1",
+    "@opentelemetry/api": "1.9.1",
     "@orbit/agent": "workspace:*",
     "@orbit/db": "workspace:*",
     "@orbit/llm": "workspace:*",
     "@orbit/shared": "workspace:*",
-    "@opentelemetry/api": "1.9.1",
+    "@sentry/node": "^11.1.0",
     "adm-zip": "0.6.1",
     "archiver": "8.0.0",
     "fastify": "5.12.5",

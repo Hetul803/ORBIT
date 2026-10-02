@@ -40,3 +40,35 @@ Restore into an isolated database, run `prisma migrate status`, validate append-
 ## Deploy checklist
 
 Use managed PostgreSQL with pgvector, Redis with persistence, TLS at every public boundary, an S3-compatible private bucket, centralized OpenTelemetry collection, a Redis-backed realtime fanout, unique production secrets, verified OTP sender domains, tested backups, and separate staging credentials. Run migrations as a one-shot release job before rolling API and worker instances.
+
+## Private staging deployment
+
+The repository ships a one-command deployment entry point for a pre-provisioned Linux host:
+
+```bash
+ORBIT_STAGING_SECRET_ID=orbit/staging \
+STAGING_DOMAIN=staging.example.com \
+./infra/staging/deploy.sh
+```
+
+The script requires `aws`, `docker`, `jq`, and `curl`. It reads one JSON object from AWS Secrets Manager into the deployment process, validates required values, rejects PostgreSQL URLs without `sslmode=require`, rejects Redis URLs that are not `rediss://`, builds the API/worker/migration images, runs `prisma migrate deploy`, starts API/worker/Caddy, and waits for the public TLS `/ready` endpoint. It never writes the secret JSON to disk.
+
+Provision these resources before running it:
+
+1. A private host with Docker Compose, ports 80/443 open, and an IAM role allowed to read only the staging secret.
+2. DNS for `STAGING_DOMAIN` pointing to that host. Caddy obtains and renews its TLS certificate.
+3. Managed PostgreSQL 16 with pgvector enabled and encrypted transit.
+4. Managed Redis with TLS and persistence.
+5. A Secrets Manager JSON object containing `DATABASE_URL`, `REDIS_URL`, `ALLOWED_ORIGINS`, independent JWT secrets, field-encryption/export secrets, Resend/Twilio credentials, and `SENTRY_DSN`. Optional Google/LLM/search credentials can live in the same object.
+6. Mobile development or preview builds compiled with `EXPO_PUBLIC_API_URL=https://<STAGING_DOMAIN>` and `EXPO_PUBLIC_WS_URL=wss://<STAGING_DOMAIN>/v1/stream`.
+
+After deployment:
+
+```bash
+curl --fail https://$STAGING_DOMAIN/health
+curl --fail https://$STAGING_DOMAIN/ready
+docker compose -f infra/staging/docker-compose.yml ps
+docker compose -f infra/staging/docker-compose.yml logs --tail=200 api worker caddy
+```
+
+The deployment assets are tested syntactically in-repository. Provisioning the host, managed services, DNS, OAuth/sender accounts, and physical-device preview builds remains an owner operation; no staging environment is claimed live until those resources exist and the fresh-account matrix passes.

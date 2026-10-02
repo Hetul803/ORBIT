@@ -47,6 +47,7 @@ export const publicUser = (user: {
   locale: string;
   timezone: string;
   status: 'ACTIVE' | 'PENDING_DELETION' | 'SUSPENDED';
+  role: 'USER' | 'MODERATOR' | 'ADMIN';
   deletionRequestedAt: Date | null;
 }): Record<string, unknown> => ({
   id: user.id,
@@ -66,5 +67,6 @@ export const publicUser = (user: {
       : user.status === 'PENDING_DELETION'
         ? 'pending_deletion'
         : 'suspended',
+  role: user.role.toLowerCase(),
   deletionRequestedAt: iso(user.deletionRequestedAt),
 });

@@ -23,6 +23,10 @@
     "api": "pnpm --filter @orbit/api dev",
     "worker": "pnpm --filter @orbit/worker dev",
     "worker:once": "pnpm --filter @orbit/worker once",
+    "eval:reranker": "pnpm --filter @orbit/worker eval:reranker",
+    "benchmark:retrieval": "pnpm --filter @orbit/worker benchmark:retrieval",
+    "smoke:web-watcher": "pnpm --filter @orbit/worker smoke:web-watcher",
+    "verify:export": "pnpm --filter @orbit/api verify:export",
     "mobile": "pnpm --filter @orbit/mobile start",
     "ci": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test"
   },

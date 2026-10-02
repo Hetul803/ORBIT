@@ -24,7 +24,12 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 
 import { requireAuth } from '../auth.js';
-import { encryptField, sha256, signExport } from '../crypto.js';
+import { encryptField, signExport } from '../crypto.js';
+import {
+  embedMemoryAndProfile,
+  refreshAgentProfileEmbedding,
+  storeMemoryEmbedding,
+} from '../embeddings.js';
 import { ApiError, parseWith } from '../errors.js';
 import type { Services } from '../services.js';
 import { asArray, asRecord, iso, logActivity, publicUser } from './helpers.js';
@@ -271,10 +276,6 @@ export const registerCoreRoutes = (app: FastifyInstance, services: Services): vo
         where: { id: auth.id },
         data: { status: UserStatus.PENDING_DELETION, deletionRequestedAt },
       });
-      await tx.refreshToken.updateMany({
-        where: { userId: auth.id, revokedAt: null },
-        data: { revokedAt: new Date() },
-      });
       await logActivity(tx, {
         userId: auth.id,
         actorType: 'USER',
@@ -290,6 +291,52 @@ export const registerCoreRoutes = (app: FastifyInstance, services: Services): vo
       deleteAfter: deleteAfter.toISOString(),
       graceDays: services.config.DELETION_GRACE_DAYS,
     });
+  });
+
+  app.post('/v1/me/deletion/cancel', async (request) => {
+    const auth = await requireAuth(request, services.config);
+    const user = await services.db.user.findUnique({ where: { id: auth.id } });
+    if (user === null) throw new ApiError(404, 'USER_NOT_FOUND', 'The account no longer exists.');
+    if (user.status !== UserStatus.PENDING_DELETION || user.deletionRequestedAt === null) {
+      throw new ApiError(
+        409,
+        'DELETION_NOT_PENDING',
+        'This account is not scheduled for deletion.',
+      );
+    }
+    await services.db.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: auth.id },
+        data: { status: UserStatus.ACTIVE, deletionRequestedAt: null },
+      });
+      await logActivity(tx, {
+        userId: auth.id,
+        actorType: 'USER',
+        action: 'account.deletion_cancelled',
+        targetType: 'User',
+        targetId: auth.id,
+        requestId: request.id,
+      });
+    });
+    return { ok: true };
+  });
+
+  app.get('/v1/me/deletion', async (request) => {
+    const auth = await requireAuth(request, services.config);
+    const user = await services.db.user.findUnique({ where: { id: auth.id } });
+    if (user === null) throw new ApiError(404, 'USER_NOT_FOUND', 'The account no longer exists.');
+    const pending =
+      user.status === UserStatus.PENDING_DELETION && user.deletionRequestedAt !== null;
+    return {
+      pending,
+      requestedAt: pending ? user.deletionRequestedAt?.toISOString() : null,
+      deleteAfter: pending
+        ? new Date(
+            (user.deletionRequestedAt?.getTime() ?? 0) +
+              services.config.DELETION_GRACE_DAYS * 86_400_000,
+          ).toISOString()
+        : null,
+    };
   });
 
   app.get('/v1/me/export', async (request, reply) => {
@@ -415,7 +462,45 @@ export const registerCoreRoutes = (app: FastifyInstance, services: Services): vo
     ];
     if (newFactKind === undefined) throw new Error('Interview fact mapping is incomplete');
     const complete = answers.length >= interviewQuestions.length;
-    await services.db.$transaction(async (tx) => {
+    let nextQuestion: string | undefined = complete
+      ? undefined
+      : interviewQuestions[answers.length];
+    let adaptive = false;
+    if (!complete) {
+      try {
+        const completion = await services.llm.complete({
+          task: 'interview',
+          userId: auth.id,
+          runId: run.id,
+          requestId: request.id,
+          messages: [
+            {
+              role: 'system',
+              content:
+                'Ask one concise, non-leading follow-up that learns a durable preference, goal, boundary, or communication style. Return JSON only: {"question":string}. Do not ask for identifying or sensitive data.',
+            },
+            {
+              role: 'user',
+              content: `Interview answers so far:\n${answers.map((answer, index) => `${String(index + 1)}. ${answer}`).join('\n')}\nAsk the best next question.`,
+            },
+          ],
+          constraints: { maxOutputTokens: 120, temperature: 0.35, jsonMode: true },
+        });
+        const parsed = asRecord(JSON.parse(completion.text));
+        if (
+          typeof parsed.question === 'string' &&
+          parsed.question.trim().length >= 10 &&
+          parsed.question.trim().length <= 300 &&
+          !interviewQuestions.slice(0, answers.length).includes(parsed.question.trim() as never)
+        ) {
+          nextQuestion = parsed.question.trim();
+          adaptive = completion.provider !== 'stub';
+        }
+      } catch {
+        // The bounded deterministic question set remains available if a configured provider fails.
+      }
+    }
+    const learnedFact = await services.db.$transaction(async (tx) => {
       await tx.run.update({
         where: { id: run.id },
         data: {
@@ -424,14 +509,13 @@ export const registerCoreRoutes = (app: FastifyInstance, services: Services): vo
           endedAt: complete ? new Date() : null,
         },
       });
-      await tx.memoryFact.create({
+      const fact = await tx.memoryFact.create({
         data: {
           agentId: agent.id,
           kind: newFactKind.toUpperCase() as MemoryKind,
           content: body.answer,
           confidence: 0.8,
           source: MemorySource.INTERVIEW,
-          embeddingHash: sha256(body.answer),
         },
       });
       if (complete) {
@@ -449,14 +533,23 @@ export const registerCoreRoutes = (app: FastifyInstance, services: Services): vo
           },
         });
       }
+      return fact;
     });
+    const embeddingReady = await embedMemoryAndProfile(
+      services,
+      learnedFact.id,
+      agent.id,
+      learnedFact.content,
+    );
     return {
       sessionId: run.id,
       question: complete
         ? 'Your profile is ready. What should your agent be called?'
-        : interviewQuestions[answers.length],
+        : nextQuestion,
       progress: Math.min(1, answers.length / interviewQuestions.length),
       complete,
+      adaptive,
+      embeddingReady,
       learnedFacts: [{ kind: newFactKind, content: body.answer }],
       profilePreview: answers.map((answer, index) => ({
         label: `Signal ${String(index + 1)}`,
@@ -509,7 +602,6 @@ export const registerCoreRoutes = (app: FastifyInstance, services: Services): vo
               content: fact.content,
               confidence: fact.confidence,
               source: MemorySource.IMPORT,
-              embeddingHash: sha256(fact.content),
             },
           }),
         ),
@@ -520,6 +612,10 @@ export const registerCoreRoutes = (app: FastifyInstance, services: Services): vo
       });
       return imported;
     });
+    const embedded = await Promise.all(
+      created.map((fact) => storeMemoryEmbedding(services, fact.id, fact.content)),
+    );
+    if (embedded.some(Boolean)) await refreshAgentProfileEmbedding(services, agent.id);
     await logActivity(services.db, {
       userId: auth.id,
       actorType: 'USER',
@@ -531,6 +627,7 @@ export const registerCoreRoutes = (app: FastifyInstance, services: Services): vo
     });
     return reply.code(201).send({
       imported: created.length,
+      embedded: embedded.filter(Boolean).length,
       facts: created.map(memoryDto),
       privacy: 'The raw export was parsed in memory and was not retained.',
     });
@@ -564,9 +661,14 @@ export const registerCoreRoutes = (app: FastifyInstance, services: Services): vo
         source: MemorySource.CORRECTION,
         confidence: 1,
         userEditedAt: new Date(),
-        embeddingHash: sha256(body.content),
       },
     });
+    const embeddingReady = await embedMemoryAndProfile(
+      services,
+      updated.id,
+      agent.id,
+      updated.content,
+    );
     await logActivity(services.db, {
       userId: auth.id,
       actorType: 'USER',
@@ -575,7 +677,7 @@ export const registerCoreRoutes = (app: FastifyInstance, services: Services): vo
       targetId: updated.id,
       requestId: request.id,
     });
-    return memoryDto(updated);
+    return { ...memoryDto(updated), embeddingReady };
   });
 
   app.delete('/v1/agent/memory/:id', async (request, reply) => {
@@ -596,6 +698,7 @@ export const registerCoreRoutes = (app: FastifyInstance, services: Services): vo
       targetId: params.id,
       requestId: request.id,
     });
+    await refreshAgentProfileEmbedding(services, agent.id);
     return reply.code(204).send();
   });
 

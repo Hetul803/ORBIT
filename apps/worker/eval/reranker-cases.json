@@ -1,0 +1,68 @@
+[
+  {
+    "id": "friendship-low-pressure",
+    "intent": "friendship quiet weekends",
+    "positiveHistory": "low pressure walks museums thoughtful conversation",
+    "negativeHistory": "nightlife spontaneous crowds",
+    "expectedWinner": "a",
+    "candidates": [
+      { "id": "a", "profile": "museum walks and thoughtful low pressure weekends" },
+      { "id": "b", "profile": "spontaneous nightlife and large crowds every weekend" }
+    ]
+  },
+  {
+    "id": "cofounder-operating-style",
+    "intent": "cofounder climate software",
+    "positiveHistory": "weekly written updates customer interviews calm disagreement",
+    "negativeHistory": "move fast no process constant pivots",
+    "expectedWinner": "a",
+    "candidates": [
+      { "id": "a", "profile": "climate founder who uses written updates and customer interviews" },
+      { "id": "b", "profile": "climate hacker who loves constant pivots with no process" }
+    ]
+  },
+  {
+    "id": "roommate-boundaries",
+    "intent": "roommate near campus",
+    "positiveHistory": "quiet after ten shared cleaning plan direct communication",
+    "negativeHistory": "late parties informal chores",
+    "expectedWinner": "a",
+    "candidates": [
+      { "id": "a", "profile": "near campus quiet nights and a shared cleaning plan" },
+      { "id": "b", "profile": "near campus late parties and informal chores" }
+    ]
+  },
+  {
+    "id": "study-structure",
+    "intent": "study partner organic chemistry",
+    "positiveHistory": "scheduled sessions practice problems explain aloud",
+    "negativeHistory": "last minute cram silent study",
+    "expectedWinner": "a",
+    "candidates": [
+      { "id": "a", "profile": "organic chemistry practice problems in scheduled sessions" },
+      { "id": "b", "profile": "organic chemistry last minute cram and silent study" }
+    ]
+  },
+  {
+    "id": "gym-consistency",
+    "intent": "gym partner mornings",
+    "positiveHistory": "three days consistent supportive no competition",
+    "negativeHistory": "maximum intensity competitive daily",
+    "expectedWinner": "a",
+    "candidates": [
+      { "id": "a", "profile": "supportive consistent morning workouts three days" },
+      { "id": "b", "profile": "competitive maximum intensity morning workouts daily" }
+    ]
+  },
+  {
+    "id": "mentor-feedback",
+    "intent": "product design mentor",
+    "positiveHistory": "specific critique monthly portfolio review",
+    "negativeHistory": "generic encouragement unavailable",
+    "expectedWinner": "a",
+    "candidates": [
+      { "id": "a", "profile": "product designer offering specific monthly portfolio critique" },
+      { "id": "b", "profile": "product leader offering generic encouragement when available" }
+    ]
+  }
+]
