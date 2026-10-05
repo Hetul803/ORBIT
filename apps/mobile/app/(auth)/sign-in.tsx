@@ -15,6 +15,7 @@ interface OtpRequestResponse {
 interface OtpVerifyResponse {
   accessToken: string;
   refreshToken: string;
+  hasAgent: boolean;
 }
 
 export default function SignIn(): ReactNode {
@@ -56,7 +57,7 @@ export default function SignIn(): ReactNode {
         jsonBody({ email, code, dateOfBirth, displayName }),
       );
       await setTokens(result.accessToken, result.refreshToken);
-      router.replace('/agent');
+      router.replace(result.hasAgent ? '/today' : '/agent');
     } catch (caught: unknown) {
       setError(caught instanceof ApiRequestError ? caught.message : 'Could not verify the code.');
     } finally {

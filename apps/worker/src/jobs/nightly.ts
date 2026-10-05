@@ -16,7 +16,7 @@ import {
   type IntentKind,
   type PrismaClient,
 } from '@orbit/db';
-import type { ModelRouter } from '@orbit/llm';
+import { CostCapError, type ModelRouter } from '@orbit/llm';
 import type { IntentKind as ApiIntentKind } from '@orbit/shared';
 
 import type { WorkerConfig } from '../config.js';
@@ -486,17 +486,31 @@ export const runNightly = async (
           startedAt: new Date(),
         },
       });
-      const ranked = await rerankCandidates(
-        selected,
-        new Map(potential.map((candidate) => [candidate.id, profileText(candidate)])),
-        { kind: toApiIntent(intent.kind), params: intent.params as Record<string, unknown> },
-        router,
-        {
-          userId: source.userId,
-          runId: run.id,
-          outcomeExamples: await outcomeExamples(db, source.userId),
-        },
-      );
+      let ranked: Awaited<ReturnType<typeof rerankCandidates>>;
+      try {
+        ranked = await rerankCandidates(
+          selected,
+          new Map(potential.map((candidate) => [candidate.id, profileText(candidate)])),
+          { kind: toApiIntent(intent.kind), params: intent.params as Record<string, unknown> },
+          router,
+          {
+            userId: source.userId,
+            runId: run.id,
+            outcomeExamples: await outcomeExamples(db, source.userId),
+          },
+        );
+      } catch (error: unknown) {
+        const pausedForCap = error instanceof CostCapError;
+        await db.run.update({
+          where: { id: run.id },
+          data: {
+            status: pausedForCap ? RunStatus.PAUSED_COST_CAP : RunStatus.FAILED,
+            endedAt: new Date(),
+          },
+        });
+        if (pausedForCap) continue;
+        throw error;
+      }
       await db.run.update({
         where: { id: run.id },
         data: { status: RunStatus.SUCCEEDED, endedAt: new Date() },

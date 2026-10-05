@@ -196,7 +196,11 @@ export const registerAuthRoutes = (app: FastifyInstance, services: Services): vo
         targetId: user.id,
         requestId: request.id,
       });
-      return { ...tokens, user: publicUser(user) };
+      const agent = await services.db.agent.findUnique({
+        where: { userId: user.id },
+        select: { id: true },
+      });
+      return { ...tokens, user: publicUser(user), hasAgent: agent !== null };
     },
   });
 

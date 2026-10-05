@@ -64,7 +64,11 @@ const decode = async <T>(response: Response): Promise<T> => {
 const fetchWithAuth = async (path: string, init: RequestInit): Promise<Response> => {
   const state = useAuthStore.getState();
   const headers = new Headers(init.headers);
-  if (!(init.body instanceof FormData)) headers.set('Content-Type', 'application/json');
+  // Fastify rejects an empty body advertised as JSON. Keep the content type attached
+  // to actual JSON writes, but let bodyless POST/DELETE requests remain bodyless.
+  if (init.body !== undefined && init.body !== null && !(init.body instanceof FormData)) {
+    headers.set('Content-Type', 'application/json');
+  }
   if (state.accessToken !== null) headers.set('Authorization', `Bearer ${state.accessToken}`);
   const baseUrl = requireApiUrl();
   let response = await fetch(`${baseUrl}${path}`, { ...init, headers });

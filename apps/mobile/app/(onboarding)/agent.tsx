@@ -111,7 +111,11 @@ export default function AgentOnboarding(): ReactNode {
             onPress={() => void startInterview()}
             loading={busy}
           />
-          <Button label="I already have an agent" onPress={() => setStarted(true)} kind="quiet" />
+          <Button
+            label="I already have an agent"
+            onPress={() => router.replace('/today')}
+            kind="quiet"
+          />
         </Card>
       ) : interviewComplete ? (
         <Card tone="yours">
