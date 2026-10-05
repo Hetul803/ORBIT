@@ -2,8 +2,17 @@ import Constants from 'expo-constants';
 import * as Device from 'expo-device';
 import { Platform } from 'react-native';
 
-import { useAuthStore } from './store';
 import { resolveApiUrl } from './api-url';
+import {
+  cacheResponse,
+  cachedResponse,
+  enqueueWrite,
+  flushOfflineQueue,
+  isOfflineQueueable,
+  isOfflineReadable,
+} from './offline';
+import { useAuthStore, useNetworkStore } from './store';
+import { setApiTransport } from './transport';
 
 export { resolveApiUrl } from './api-url';
 
@@ -87,9 +96,36 @@ const fetchWithAuth = async (path: string, init: RequestInit): Promise<Response>
   return response;
 };
 
+setApiTransport(fetchWithAuth);
+
 export const api = async <T>(path: string, init: RequestInit = {}): Promise<T> => {
-  const response = await fetchWithAuth(path, init);
-  return decode<T>(response);
+  const method = (init.method ?? 'GET').toUpperCase();
+  try {
+    const response = await fetchWithAuth(path, init);
+    const value = await decode<T>(response);
+    useNetworkStore.getState().markReachable();
+    if (isOfflineReadable(path, method)) void cacheResponse(path, value);
+    void flushOfflineQueue(fetchWithAuth).catch(() => undefined);
+    return value;
+  } catch (error: unknown) {
+    const offline =
+      error instanceof TypeError || (error instanceof ApiRequestError && error.status === 0);
+    if (!offline) throw error;
+    useNetworkStore.getState().markOffline();
+    if (isOfflineReadable(path, method)) {
+      const cached = await cachedResponse(path);
+      if (cached !== null) return cached.value as T;
+    }
+    if (isOfflineQueueable(path, method)) {
+      await enqueueWrite(path, init);
+      return { ok: true, queued: true } as T;
+    }
+    throw new ApiRequestError(
+      'ORBIT cannot reach its server. Cached information is shown when available; try again when you are back online.',
+      0,
+      'NETWORK_UNAVAILABLE',
+    );
+  }
 };
 
 export const jsonBody = (value: unknown): RequestInit => ({

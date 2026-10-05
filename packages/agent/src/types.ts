@@ -66,6 +66,7 @@ export type PiiKind =
   | 'full_name'
   | 'employer'
   | 'class_section'
+  | 'internal_identifier'
   | 'exact_schedule';
 
 export interface RedactionResult {

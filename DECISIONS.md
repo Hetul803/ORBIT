@@ -55,3 +55,20 @@ Each choice below resolves an implementation detail the product brief intentiona
 ## Known external-boundary gaps
 
 Provider implementations are present for Resend, Twilio, Google OAuth/Gmail, Expo push, OpenAI embeddings, a configured search API, and Sentry. Production validation still requires owner credentials, verified domains, a Google OAuth application, an EAS project, physical devices, managed staging infrastructure, and store signing. The fresh-device matrix and GitHub issues remain the source of truth; none of those external outcomes is represented as complete before it is observed.
+
+## Pass 4 model, profile, and autonomy decisions — 2026-10-05
+
+| Decision                                                                             | Reasoning                                                                                                                                          |
+| ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OpenRouter catalog prices are refreshed at runtime and cached for one hour           | Model price cards can move. The route still requires explicit environment prices as a safe fallback when the catalog is unavailable.               |
+| Task names resolve to cheap, mid, or strong tiers in environment configuration       | Model routing can change without editing feature code; every tier has an explicit primary and fallback provider/model/cost route.                  |
+| GPT-4o mini is the local cheap primary and Gemini 2.5 Flash Lite is its fallback     | Redaction and short routing work need low per-token cost; each result remains checked by the downstream privacy policy.                            |
+| GPT-4.1 mini is the local mid primary and Gemini 2.5 Flash is its fallback           | It was selected after Gemini had less consistent structured redaction and fact discipline in the live synthetic evaluation.                        |
+| Claude Sonnet 5.5 is the local strong primary and GPT-4.1 is its fallback            | Judging and higher-stakes drafting benefit from a stronger independent route, while a different fallback avoids a single-model outage.             |
+| Every embedding creates a `ModelCall` ledger record                                  | Retrieval cost must be auditable alongside chat calls; no fake vector is written when a usable embedding provider is absent.                       |
+| Profile facts use five layers with receipts, expiry, and supersession                | Durable identity/preferences must not be mixed with short-lived state, and profile changes need provenance and a visible correction path.          |
+| State facts do not enter the durable match profile vector                            | Temporary work should not dominate who the system retrieves as a compatible person.                                                                |
+| Portable outcome feedback imports as a judgment fact, not a foreign introduction row | Importing an outcome must not fabricate an introduction relationship that belongs to a different account.                                          |
+| Proactive action is limited to safe, reversible local state                          | A model-derived suggestion may never send a message, invite someone, change a calendar, remove external data, or bypass a human approval boundary. |
+| Five distinct accepts plus an explicit opt-in are required before Act                | Repetition of one proposal cannot manufacture trust; two dismissals lower the policy back to Propose.                                              |
+| Offline cache and queue are allowlisted rather than general                          | Cached reads are labeled; only reversible local choices replay. Outbound or ambiguous actions fail visibly when offline.                           |

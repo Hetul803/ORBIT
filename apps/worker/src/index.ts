@@ -6,6 +6,7 @@ import { loadConfig } from './config.js';
 import { runConsolidation } from './jobs/consolidation.js';
 import { runDeletion } from './jobs/deletion.js';
 import { runNightly } from './jobs/nightly.js';
+import { runProactive } from './jobs/proactive.js';
 import { deliverPush } from './jobs/push.js';
 import { runWatchers } from './jobs/watchers.js';
 import { createModelRouter } from './runtime.js';
@@ -29,14 +30,32 @@ const execute = async (name: string): Promise<unknown> => {
       return runDeletion(prisma, config);
     case 'push':
       return deliverPush(prisma);
+    case 'proactive':
+      return runProactive(prisma, config);
     default:
       throw new Error(`Unknown worker job: ${name}`);
   }
 };
 
 if (config.RUN_WORKER_ONCE === 'true') {
+  const knownJobs = [
+    'watchers',
+    'consolidation',
+    'deletion',
+    'nightly',
+    'push',
+    'proactive',
+  ] as const;
+  const selected = config.WORKER_ONCE_JOBS?.split(',')
+    .map((value) => value.trim())
+    .filter((value): value is (typeof knownJobs)[number] =>
+      knownJobs.includes(value as (typeof knownJobs)[number]),
+    );
+  if (config.WORKER_ONCE_JOBS !== undefined && (selected === undefined || selected.length === 0)) {
+    throw new Error('WORKER_ONCE_JOBS must name one or more known worker jobs.');
+  }
   const results = [];
-  for (const jobName of ['watchers', 'consolidation', 'deletion', 'nightly', 'push']) {
+  for (const jobName of selected ?? knownJobs) {
     results.push({ jobName, result: await execute(jobName) });
   }
   process.stdout.write(`${JSON.stringify({ ok: true, results })}\n`);
@@ -49,6 +68,7 @@ if (config.RUN_WORKER_ONCE === 'true') {
     { name: 'consolidation', pattern: config.CONSOLIDATION_CRON },
     { name: 'deletion', pattern: config.DELETION_CRON },
     { name: 'push', pattern: config.PUSH_TICK_CRON },
+    { name: 'proactive', pattern: config.PROACTIVE_TICK_CRON },
   ] as const;
   const queues: Queue[] = [];
   const workers: Worker[] = [];

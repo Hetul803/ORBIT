@@ -5,6 +5,8 @@ import type {
   CostLedger,
   LlmProvider,
   LlmTask,
+  ModelPrice,
+  ModelPriceResolver,
   ModelRouterConfig,
   ProviderRequest,
   RouterModelConfig,
@@ -28,8 +30,17 @@ interface CircuitState {
 const sleep = async (delayMs: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, delayMs));
 
-const computeCostCents = (tokensIn: number, tokensOut: number, config: RouterModelConfig): number =>
-  (tokensIn * config.inputCostPerMillionTokens + tokensOut * config.outputCostPerMillionTokens) /
+const configuredPrice = (config: RouterModelConfig, fallback: boolean): ModelPrice => ({
+  inputCostPerMillionTokens: fallback
+    ? (config.fallbackInputCostPerMillionTokens ?? config.inputCostPerMillionTokens)
+    : config.inputCostPerMillionTokens,
+  outputCostPerMillionTokens: fallback
+    ? (config.fallbackOutputCostPerMillionTokens ?? config.outputCostPerMillionTokens)
+    : config.outputCostPerMillionTokens,
+});
+
+const computeCostCents = (tokensIn: number, tokensOut: number, price: ModelPrice): number =>
+  (tokensIn * price.inputCostPerMillionTokens + tokensOut * price.outputCostPerMillionTokens) /
   1_000_000;
 
 export class ModelRouter {
@@ -40,6 +51,7 @@ export class ModelRouter {
     private readonly providers: ReadonlyMap<string, LlmProvider>,
     private readonly ledger: CostLedger,
     private readonly apiKeyResolver?: ApiKeyResolver,
+    private readonly priceResolver?: ModelPriceResolver,
   ) {}
 
   public async complete(request: CompleteRequest): Promise<CompleteResponse> {
@@ -82,7 +94,10 @@ export class ModelRouter {
           };
           const result = await provider.complete(providerRequest);
           const latencyMs = Date.now() - startedAt;
-          const costCents = computeCostCents(result.tokensIn, result.tokensOut, taskConfig);
+          const price =
+            (await this.priceResolver?.priceFor(provider.name, attempt.model)) ??
+            configuredPrice(taskConfig, attempt.fallback);
+          const costCents = computeCostCents(result.tokensIn, result.tokensOut, price);
           this.recordSuccess(`${attempt.provider}:${attempt.model}`);
           await this.ledger.record({
             userId: request.userId,
@@ -155,40 +170,68 @@ export class ModelRouter {
   }
 }
 
-const modelFor = (environment: NodeJS.ProcessEnv, task: LlmTask): string => {
-  const key = `LLM_MODEL_${task.toUpperCase()}`;
-  return environment[key] ?? `stub-${task}-v1`;
-};
-
-const costFor = (
+const configuredCost = (
   environment: NodeJS.ProcessEnv,
-  task: LlmTask,
-  direction: 'INPUT' | 'OUTPUT',
+  keys: readonly string[],
   provider: string,
 ): number => {
   if (provider === 'stub') return 0;
-  const taskKey = `LLM_COST_${task.toUpperCase()}_${direction}_CENTS_PER_MILLION_TOKENS`;
-  const genericKey = `LLM_${direction}_COST_CENTS_PER_MILLION_TOKENS`;
-  const taskValue = environment[taskKey]?.trim();
-  const genericValue = environment[genericKey]?.trim();
-  const raw = taskValue === undefined || taskValue.length === 0 ? genericValue : taskValue;
+  const configured = keys
+    .map((key) => ({ key, value: environment[key]?.trim() }))
+    .find((candidate) => candidate.value !== undefined && candidate.value.length > 0);
+  const raw = configured?.value;
   if (raw === undefined) {
-    throw new Error(
-      `${genericKey} (or ${taskKey}) is required when LLM_DEFAULT_PROVIDER is not stub`,
-    );
+    throw new Error(`${keys.join(' or ')} is required when the selected provider is not stub`);
   }
   const value = Number(raw);
   if (!Number.isFinite(value) || value < 0) {
     throw new Error(
-      `${taskValue === undefined || taskValue.length === 0 ? genericKey : taskKey} must be a non-negative number`,
+      `${configured?.key ?? keys[0] ?? 'Model cost metadata'} must be a non-negative number`,
     );
   }
   return value;
 };
 
+type ModelTier = 'CHEAP' | 'MID' | 'STRONG';
+
+const defaultTierForTask: Readonly<Record<LlmTask, ModelTier>> = {
+  interview: 'MID',
+  conversation: 'MID',
+  rerank: 'MID',
+  judge: 'STRONG',
+  draft: 'STRONG',
+  redaction: 'CHEAP',
+  embedding: 'CHEAP',
+  skill_crystallization: 'MID',
+  skill_validation: 'MID',
+  ask_routing: 'CHEAP',
+};
+
+const parseTier = (environment: NodeJS.ProcessEnv, task: LlmTask): ModelTier => {
+  const value = environment[`LLM_TASK_${task.toUpperCase()}_TIER`]?.trim().toUpperCase();
+  if (value === undefined || value.length === 0) return defaultTierForTask[task];
+  if (value === 'CHEAP' || value === 'MID' || value === 'STRONG') return value;
+  throw new Error(`LLM_TASK_${task.toUpperCase()}_TIER must be CHEAP, MID, or STRONG`);
+};
+
+const modelKey = (task: LlmTask): string => `LLM_MODEL_${task.toUpperCase()}`;
+
+const tierKey = (tier: ModelTier, suffix: string): string => `LLM_TIER_${tier}_${suffix}`;
+
+const costKeys = (
+  task: LlmTask,
+  tier: ModelTier,
+  route: 'PRIMARY' | 'FALLBACK',
+  direction: 'INPUT' | 'OUTPUT',
+): readonly string[] => [
+  tierKey(tier, `${route}_${direction}_COST_CENTS_PER_MILLION_TOKENS`),
+  ...(route === 'PRIMARY' ? [tierKey(tier, `${direction}_COST_CENTS_PER_MILLION_TOKENS`)] : []),
+  `LLM_COST_${task.toUpperCase()}_${direction}_CENTS_PER_MILLION_TOKENS`,
+  `LLM_${direction}_COST_CENTS_PER_MILLION_TOKENS`,
+];
+
 export const configFromEnvironment = (environment: NodeJS.ProcessEnv): ModelRouterConfig => {
-  const provider = environment.LLM_DEFAULT_PROVIDER ?? 'stub';
-  const fallback = environment.LLM_CHEAP_FALLBACK_MODEL ?? 'stub-fallback-v1';
+  const defaultProvider = environment.LLM_DEFAULT_PROVIDER ?? 'stub';
   const tasks = [
     'interview',
     'conversation',
@@ -203,17 +246,51 @@ export const configFromEnvironment = (environment: NodeJS.ProcessEnv): ModelRout
   ] as const;
   return {
     tasks: Object.fromEntries(
-      tasks.map((task) => [
-        task,
-        {
-          primary: modelFor(environment, task),
-          fallback,
-          provider,
-          fallbackProvider: 'stub',
-          inputCostPerMillionTokens: costFor(environment, task, 'INPUT', provider),
-          outputCostPerMillionTokens: costFor(environment, task, 'OUTPUT', provider),
-        },
-      ]),
+      tasks.map((task) => {
+        const tier = parseTier(environment, task);
+        const provider = environment[tierKey(tier, 'PROVIDER')] ?? defaultProvider;
+        const fallbackProvider =
+          environment[tierKey(tier, 'FALLBACK_PROVIDER')] ??
+          environment.LLM_FALLBACK_PROVIDER ??
+          'stub';
+        const primary =
+          environment[tierKey(tier, 'PRIMARY_MODEL')] ??
+          environment[modelKey(task)] ??
+          `stub-${task}-v1`;
+        const fallback =
+          environment[tierKey(tier, 'FALLBACK_MODEL')] ??
+          environment.LLM_CHEAP_FALLBACK_MODEL ??
+          'stub-fallback-v1';
+        return [
+          task,
+          {
+            primary,
+            fallback,
+            provider,
+            fallbackProvider,
+            inputCostPerMillionTokens: configuredCost(
+              environment,
+              costKeys(task, tier, 'PRIMARY', 'INPUT'),
+              provider,
+            ),
+            outputCostPerMillionTokens: configuredCost(
+              environment,
+              costKeys(task, tier, 'PRIMARY', 'OUTPUT'),
+              provider,
+            ),
+            fallbackInputCostPerMillionTokens: configuredCost(
+              environment,
+              costKeys(task, tier, 'FALLBACK', 'INPUT'),
+              fallbackProvider,
+            ),
+            fallbackOutputCostPerMillionTokens: configuredCost(
+              environment,
+              costKeys(task, tier, 'FALLBACK', 'OUTPUT'),
+              fallbackProvider,
+            ),
+          },
+        ];
+      }),
     ) as Record<LlmTask, RouterModelConfig>,
     userDailyCapCents: Number(environment.USER_DAILY_COST_CAP_CENTS ?? 35),
     globalDailyCapCents: Number(environment.GLOBAL_DAILY_COST_CAP_CENTS ?? 2_500),

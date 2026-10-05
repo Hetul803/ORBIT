@@ -540,6 +540,7 @@ export const registerCoreRoutes = (app: FastifyInstance, services: Services): vo
       learnedFact.id,
       agent.id,
       learnedFact.content,
+      { userId: auth.id, runId: run.id, requestId: request.id },
     );
     return {
       sessionId: run.id,
@@ -613,9 +614,19 @@ export const registerCoreRoutes = (app: FastifyInstance, services: Services): vo
       return imported;
     });
     const embedded = await Promise.all(
-      created.map((fact) => storeMemoryEmbedding(services, fact.id, fact.content)),
+      created.map((fact) =>
+        storeMemoryEmbedding(services, fact.id, fact.content, {
+          userId: auth.id,
+          requestId: request.id,
+        }),
+      ),
     );
-    if (embedded.some(Boolean)) await refreshAgentProfileEmbedding(services, agent.id);
+    if (embedded.some(Boolean)) {
+      await refreshAgentProfileEmbedding(services, agent.id, {
+        userId: auth.id,
+        requestId: request.id,
+      });
+    }
     await logActivity(services.db, {
       userId: auth.id,
       actorType: 'USER',
@@ -668,6 +679,7 @@ export const registerCoreRoutes = (app: FastifyInstance, services: Services): vo
       updated.id,
       agent.id,
       updated.content,
+      { userId: auth.id, requestId: request.id },
     );
     await logActivity(services.db, {
       userId: auth.id,
@@ -698,7 +710,10 @@ export const registerCoreRoutes = (app: FastifyInstance, services: Services): vo
       targetId: params.id,
       requestId: request.id,
     });
-    await refreshAgentProfileEmbedding(services, agent.id);
+    await refreshAgentProfileEmbedding(services, agent.id, {
+      userId: auth.id,
+      requestId: request.id,
+    });
     return reply.code(204).send();
   });
 

@@ -62,3 +62,22 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ accessToken: null, refreshToken: null, onboarded: false });
   },
 }));
+
+interface NetworkState {
+  reachable: boolean;
+  lastOfflineAt: number | null;
+  queuedWrites: number;
+  markReachable: () => void;
+  markOffline: () => void;
+  setQueuedWrites: (count: number) => void;
+}
+
+/** Transport state only; it reflects ORBIT API requests rather than guessing internet access. */
+export const useNetworkStore = create<NetworkState>((set) => ({
+  reachable: true,
+  lastOfflineAt: null,
+  queuedWrites: 0,
+  markReachable: () => set({ reachable: true }),
+  markOffline: () => set({ reachable: false, lastOfflineAt: Date.now() }),
+  setQueuedWrites: (queuedWrites) => set({ queuedWrites }),
+}));

@@ -1,9 +1,14 @@
 import { z } from 'zod';
 
+const optionalUrl = z.preprocess(
+  (value) => (typeof value === 'string' && value.trim().length === 0 ? undefined : value),
+  z.url().optional(),
+);
+
 const environmentSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   LOG_LEVEL: z.string().default('info'),
-  SENTRY_DSN: z.url().optional(),
+  SENTRY_DSN: optionalUrl,
   SENTRY_ENVIRONMENT: z.string().default('development'),
   API_HOST: z.string().default('0.0.0.0'),
   API_PORT: z.coerce.number().int().positive().default(4100),
@@ -29,7 +34,7 @@ const environmentSchema = z.object({
   SEARCH_API_KEY: z.string().optional(),
   GOOGLE_OAUTH_CLIENT_ID: z.string().optional(),
   GOOGLE_OAUTH_CLIENT_SECRET: z.string().optional(),
-  GOOGLE_OAUTH_REDIRECT_URI: z.url().optional(),
+  GOOGLE_OAUTH_REDIRECT_URI: optionalUrl,
   ORBIT_MOBILE_REDIRECT_URL: z.string().default('orbit://connections'),
   FIELD_ENCRYPTION_KEY: z.string().default('AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='),
   EXPORT_SIGNING_SECRET: z.string().min(12).default('development-export-signing-secret'),
@@ -40,7 +45,7 @@ const environmentSchema = z.object({
   OPENAI_EMBEDDING_MODEL: z.string().default('text-embedding-3-small'),
   OPENROUTER_API_KEY: z.string().optional(),
   OPENROUTER_BASE_URL: z.url().default('https://openrouter.ai/api/v1'),
-  OPENROUTER_HTTP_REFERER: z.url().optional(),
+  OPENROUTER_HTTP_REFERER: optionalUrl,
   OPENROUTER_APP_TITLE: z.string().default('ORBIT'),
   OPENROUTER_EMBEDDING_MODEL: z.string().default('openai/text-embedding-3-small'),
   ANTHROPIC_API_KEY: z.string().optional(),

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { configFromEnvironment, CostCapError, ModelRouter } from '../src/router.js';
+import { OpenRouterCatalogPriceResolver } from '../src/openrouter-catalog.js';
 import { StubProvider } from '../src/providers.js';
 import type { CostLedger, LlmProvider, ModelCallRecord, ModelRouterConfig } from '../src/types.js';
 
@@ -140,6 +141,36 @@ describe('provider router', () => {
     );
   });
 
+  it('maps explicit cheap, mid, and strong tiers without changing task call sites', () => {
+    const loaded = configFromEnvironment({
+      LLM_DEFAULT_PROVIDER: 'openrouter',
+      LLM_TIER_CHEAP_PROVIDER: 'openrouter',
+      LLM_TIER_CHEAP_PRIMARY_MODEL: 'cheap-primary',
+      LLM_TIER_CHEAP_FALLBACK_MODEL: 'cheap-fallback',
+      LLM_TIER_CHEAP_INPUT_COST_CENTS_PER_MILLION_TOKENS: '10',
+      LLM_TIER_CHEAP_OUTPUT_COST_CENTS_PER_MILLION_TOKENS: '40',
+      LLM_TIER_CHEAP_FALLBACK_INPUT_COST_CENTS_PER_MILLION_TOKENS: '11',
+      LLM_TIER_CHEAP_FALLBACK_OUTPUT_COST_CENTS_PER_MILLION_TOKENS: '41',
+      LLM_TIER_MID_PROVIDER: 'openrouter',
+      LLM_TIER_MID_PRIMARY_MODEL: 'mid-primary',
+      LLM_TIER_MID_FALLBACK_MODEL: 'mid-fallback',
+      LLM_TIER_MID_INPUT_COST_CENTS_PER_MILLION_TOKENS: '30',
+      LLM_TIER_MID_OUTPUT_COST_CENTS_PER_MILLION_TOKENS: '250',
+      LLM_TIER_MID_FALLBACK_INPUT_COST_CENTS_PER_MILLION_TOKENS: '40',
+      LLM_TIER_MID_FALLBACK_OUTPUT_COST_CENTS_PER_MILLION_TOKENS: '260',
+      LLM_TIER_STRONG_PROVIDER: 'openrouter',
+      LLM_TIER_STRONG_PRIMARY_MODEL: 'strong-primary',
+      LLM_TIER_STRONG_FALLBACK_MODEL: 'strong-fallback',
+      LLM_TIER_STRONG_INPUT_COST_CENTS_PER_MILLION_TOKENS: '200',
+      LLM_TIER_STRONG_OUTPUT_COST_CENTS_PER_MILLION_TOKENS: '1000',
+      LLM_TIER_STRONG_FALLBACK_INPUT_COST_CENTS_PER_MILLION_TOKENS: '210',
+      LLM_TIER_STRONG_FALLBACK_OUTPUT_COST_CENTS_PER_MILLION_TOKENS: '1100',
+    });
+    expect(loaded.tasks.redaction.primary).toBe('cheap-primary');
+    expect(loaded.tasks.conversation.primary).toBe('mid-primary');
+    expect(loaded.tasks.judge.primary).toBe('strong-primary');
+  });
+
   it('falls back and records an auditable call', async () => {
     const ledger = new Ledger();
     const router = new ModelRouter(config, new Map([['stub', new StubProvider()]]), ledger);
@@ -147,6 +178,31 @@ describe('provider router', () => {
     expect(result.usedFallback).toBe(true);
     expect(result.provider).toBe('stub');
     expect(ledger.calls).toHaveLength(1);
+  });
+
+  it('uses live catalog pricing when it is available and retained configuration when it is not', async () => {
+    const resolver = new OpenRouterCatalogPriceResolver({
+      ttlMs: 60_000,
+      fetcher: () =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              data: [
+                { id: 'catalog-model', pricing: { prompt: '0.0000001', completion: '0.0000004' } },
+              ],
+            }),
+            { status: 200 },
+          ),
+        ),
+    });
+    await expect(resolver.priceFor('openrouter', 'catalog-model')).resolves.toEqual({
+      inputCostPerMillionTokens: 10,
+      outputCostPerMillionTokens: 40,
+    });
+    const unavailable = new OpenRouterCatalogPriceResolver({
+      fetcher: async () => Promise.reject(new Error('offline')),
+    });
+    await expect(unavailable.priceFor('openrouter', 'catalog-model')).resolves.toBeUndefined();
   });
 
   it('enforces the user cap before making a provider call', async () => {

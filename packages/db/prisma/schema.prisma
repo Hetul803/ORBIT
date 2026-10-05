@@ -167,6 +167,46 @@ enum LifeItemStatus {
   COMPLETED
 }
 
+enum ProfileLayer {
+  IDENTITY
+  PREFERENCES
+  RELATIONSHIPS
+  JUDGMENT
+  STATE
+}
+
+enum ProfileFactState {
+  ACTIVE
+  SUPERSEDED
+  RETIRED
+}
+
+enum ProactiveProposalType {
+  APPROACHING_COMMITMENT
+  UNANSWERED_MESSAGE
+  CALENDAR_CONFLICT
+  WATCHER_HIT
+  STALE_PROJECT
+  PATTERN
+  RECURRING_TASK
+}
+
+enum ProactiveAutonomyLevel {
+  OBSERVE
+  PROPOSE
+  ACT
+}
+
+enum ProactiveProposalStatus {
+  OBSERVED
+  PROPOSED
+  ACCEPTED
+  DISMISSED
+  ACTED
+  SNOOZED
+  EXPIRED
+}
+
 enum ActorType {
   USER
   AGENT
@@ -241,6 +281,8 @@ model User {
   apiKeys               EncryptedApiKey[]
   sourceDocuments       SourceDocument[]
   lifeItems             LifeItem[]
+  proactivePolicies     ProactivePolicy[]
+  proactiveProposals    ProactiveProposal[]
   introductionsAsA      Introduction[]         @relation("IntroductionUserA")
   introductionsAsB      Introduction[]         @relation("IntroductionUserB")
   moderationActions     ModerationAction[]      @relation("Moderator")
@@ -285,6 +327,15 @@ model MemoryFact {
   content         String
   confidence      Float
   source          MemorySource
+  profileLayer    ProfileLayer      @default(PREFERENCES)
+  state           ProfileFactState  @default(ACTIVE)
+  canonicalKey    String?
+  sourceRef       String?
+  firstSeenAt     DateTime          @default(now())
+  lastConfirmedAt DateTime          @default(now())
+  expiresAt       DateTime?
+  expiryPolicy    String            @default("never")
+  observationCount Int               @default(1)
   embedding       Unsupported("vector(1536)")?
   embeddingHash   String?
   supersededById  String?
@@ -292,11 +343,15 @@ model MemoryFact {
   agent           Agent        @relation(fields: [agentId], references: [id], onDelete: Cascade)
   supersededBy    MemoryFact?  @relation("FactSupersession", fields: [supersededById], references: [id], onDelete: SetNull)
   supersedes      MemoryFact[] @relation("FactSupersession")
+  receipts        ProfileFactReceipt[]
 
   @@index([agentId])
   @@index([kind])
   @@index([supersededById])
   @@index([deletedAt])
+  @@index([agentId, profileLayer, state])
+  @@index([agentId, canonicalKey])
+  @@index([expiresAt])
 }
 
 model Intent {
@@ -814,6 +869,64 @@ model LifeItem {
   @@unique([userId, stableKey])
   @@index([userId, status, dueAt])
   @@index([userId, kind, createdAt])
+}
+
+model ProfileFactReceipt {
+  id          String      @id @default(cuid())
+  createdAt   DateTime    @default(now())
+  factId      String
+  action      String
+  reason      String
+  previous    Json?
+  next        Json?
+  fact        MemoryFact  @relation(fields: [factId], references: [id], onDelete: Cascade)
+
+  @@index([factId, createdAt])
+}
+
+model ProactivePolicy {
+  id                  String                  @id @default(cuid())
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
+  userId              String
+  type                ProactiveProposalType
+  level               ProactiveAutonomyLevel  @default(PROPOSE)
+  consecutiveAccepts  Int                     @default(0)
+  consecutiveDismissals Int                   @default(0)
+  promotionOfferedAt  DateTime?
+  lastChangedReason   String?
+  user                User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  proposals           ProactiveProposal[]
+
+  @@unique([userId, type])
+  @@index([userId, level])
+}
+
+model ProactiveProposal {
+  id             String                  @id @default(cuid())
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
+  userId         String
+  policyId       String?
+  type           ProactiveProposalType
+  level          ProactiveAutonomyLevel
+  status         ProactiveProposalStatus
+  stableKey      String
+  title          String
+  detail         String
+  confidence     Float
+  reason         Json
+  reversible     Boolean                 @default(true)
+  touchesOthers  Boolean                 @default(false)
+  dueAt          DateTime?
+  actedAt        DateTime?
+  user           User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  policy         ProactivePolicy?        @relation(fields: [policyId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, stableKey])
+  @@index([userId, status, createdAt])
+  @@index([policyId])
+  @@index([dueAt])
 }
 
 model ActivityLog {

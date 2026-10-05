@@ -100,3 +100,34 @@ export interface CurrentUser {
   deletionRequestedAt: string | null;
   role: 'user' | 'moderator' | 'admin';
 }
+
+export interface ProactivePolicy {
+  id: string;
+  type: string;
+  level: 'observe' | 'propose' | 'act';
+  consecutiveAccepts: number;
+  consecutiveDismissals: number;
+  promotionOfferedAt: string | null;
+  lastChangedReason: string | null;
+}
+
+export interface ProactiveProposal {
+  id: string;
+  type: string;
+  level: 'observe' | 'propose' | 'act';
+  status: string;
+  title: string;
+  detail: string;
+  confidence: number;
+  reason: Record<string, unknown>;
+  reversible: boolean;
+  touchesOthers: boolean;
+  dueAt: string | null;
+  createdAt: string;
+  actedAt: string | null;
+}
+
+export interface ProactiveDashboard {
+  policies: ProactivePolicy[];
+  proposals: ProactiveProposal[];
+}

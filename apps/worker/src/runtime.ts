@@ -7,6 +7,7 @@ import {
   GoogleProvider,
   ModelRouter,
   OpenAiProvider,
+  OpenRouterCatalogPriceResolver,
   OpenRouterProvider,
   StubProvider,
   type CostLedger,
@@ -105,5 +106,9 @@ export const createModelRouter = (db: PrismaClient, config: WorkerConfig): Model
         ? undefined
         : decryptField(key.encryptedValue, config.FIELD_ENCRYPTION_KEY);
     },
+    new OpenRouterCatalogPriceResolver({
+      baseUrl: config.OPENROUTER_BASE_URL,
+      ...(config.OPENROUTER_API_KEY === undefined ? {} : { apiKey: config.OPENROUTER_API_KEY }),
+    }),
   );
 };

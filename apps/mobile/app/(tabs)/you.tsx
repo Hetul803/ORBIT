@@ -62,6 +62,12 @@ export default function You(): ReactNode {
           icon="mail"
         />
         <RowLink
+          title="Proactive controls"
+          detail="Suggestions, evidence, and autonomy levels"
+          onPress={() => router.push('/proactive')}
+          icon="eye"
+        />
+        <RowLink
           title="Safety center"
           detail="Block, report, check-ins, and emergency controls"
           onPress={() => router.push('/safety')}

@@ -103,6 +103,23 @@ export interface RouterModelConfig {
   readonly fallbackProvider: string;
   readonly inputCostPerMillionTokens: number;
   readonly outputCostPerMillionTokens: number;
+  /** Used only when the fallback model handles a request. */
+  readonly fallbackInputCostPerMillionTokens?: number;
+  /** Used only when the fallback model handles a request. */
+  readonly fallbackOutputCostPerMillionTokens?: number;
+}
+
+export interface ModelPrice {
+  readonly inputCostPerMillionTokens: number;
+  readonly outputCostPerMillionTokens: number;
+}
+
+/**
+ * Optional live price lookup. The router keeps the environment price as a
+ * bounded fallback when the catalog cannot be reached.
+ */
+export interface ModelPriceResolver {
+  priceFor(provider: string, model: string): Promise<ModelPrice | undefined>;
 }
 
 export interface ModelRouterConfig {

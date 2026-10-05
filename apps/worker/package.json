@@ -13,6 +13,7 @@
     "dev": "tsx watch src/index.ts",
     "start": "node dist/src/index.js",
     "once": "RUN_WORKER_ONCE=true tsx src/index.ts",
+    "eval:pass4": "tsx scripts/pass4-evaluate.ts",
     "eval:reranker": "tsx scripts/evaluate-reranker.ts",
     "benchmark:retrieval": "tsx scripts/benchmark-retrieval.ts",
     "smoke:web-watcher": "tsx scripts/smoke-public-watcher.ts"

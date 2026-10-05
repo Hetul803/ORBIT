@@ -39,6 +39,10 @@ const rules: readonly RedactionRule[] = [
     pattern: /\b(?:section|class)\s+[A-Z]{0,4}[- ]?\d{2,5}[A-Z]?\b/giu,
   },
   {
+    kind: 'internal_identifier',
+    pattern: /\b(?:c|m)[a-z0-9]{20,}\b/giu,
+  },
+  {
     kind: 'exact_schedule',
     pattern: /\b(?:at|from)\s+(?:[01]?\d|2[0-3]):[0-5]\d\s*(?:am|pm)?\b/giu,
   },
@@ -112,7 +116,7 @@ export const redactMessage = async (
       {
         role: 'system',
         content:
-          'Fail closed. Return JSON with safe, redacted, uncertain, flags. Remove surnames, phone numbers, email addresses, street addresses, social handles, employer names, exact class sections, and exact schedules. Do not infer replacements.',
+          'You are a redaction validator. Return one JSON object with exactly these four keys and no markdown: {"safe": boolean, "redacted": string, "uncertain": boolean, "flags": string[]}. The redacted value must be the user input with only identifying data removed. Remove surnames, phone numbers, email addresses, street addresses, social handles, employer names, exact class sections, exact schedules, and internal IDs. Do not summarize, extract interests, add keys, or change the meaning. This is an anonymous conversation: interests, general fields of study, words such as research or lab, and labels such as Agent A are not identifying data on their own. If none of the prohibited data appears, safe must be true and redacted must preserve the input exactly. If unsure, return {"safe":false,"redacted":"","uncertain":true,"flags":["uncertain"]}.',
       },
       { role: 'user', content: regexResult.redacted },
     ],

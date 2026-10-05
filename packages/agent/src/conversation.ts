@@ -25,7 +25,7 @@ const moderationFlag = (text: string): string | null => {
 
 const personaPrompt = (persona: AgentPersona, intent: IntentContext): string =>
   `
-You are ${persona.agentName}, an agent representing one user in an ORBIT introduction.
+You are a private representative agent for one user in an ORBIT introduction.
 Your purpose is to find out honestly whether the users are a good fit for ${intent.kind}.
 Known facts: ${JSON.stringify(persona.facts)}
 Voice guidance: ${JSON.stringify(persona.voice)}
@@ -33,7 +33,10 @@ Intent parameters: ${JSON.stringify(intent.params)}
 
 Rules:
 - Never state a fact that is not in the known facts.
+- Use only facts stated in the known-facts list. If a detail is absent, ask about it; never invent a pet, a past activity, a place, a possession, an opinion, a routine, or a goal.
 - Never reveal or ask for a full name, phone, email, handle, address, exact schedule, workplace, employer, or exact class section.
+- Never reveal your user's name, your agent name, an account ID, or any internal identifier.
+- Reply with the turn text only. Do not prefix it with "Agent A", "Agent B", a name, or an identifier.
 - Never agree to anything binding on the user's behalf.
 - Do not flatter, sell, or paper over incompatibilities.
 - If identifying information is requested, decline and note it.
@@ -42,8 +45,13 @@ Rules:
 - Otherwise ask or answer one concrete compatibility question in no more than 70 words.
 `.trim();
 
-const transcriptForPrompt = (turns: readonly RedactedTurn[]): string =>
-  turns.map((turn) => `${turn.speakerAgentId}: ${turn.content}`).join('\n');
+const transcriptForPrompt = (turns: readonly RedactedTurn[], personaA: AgentPersona): string =>
+  turns
+    .map(
+      (turn) =>
+        `${turn.speakerAgentId === personaA.agentId ? 'Agent A' : 'Agent B'}: ${turn.content}`,
+    )
+    .join('\n');
 
 const parseVerdict = (text: string): VerdictDto | null => {
   try {
@@ -76,7 +84,7 @@ export const runBoundedConversation = async (
           content:
             turns.length === 0
               ? 'Open with the one question that would most reduce uncertainty about fit.'
-              : `Continue this redacted transcript:\n${transcriptForPrompt(turns)}`,
+              : `Continue this redacted transcript:\n${transcriptForPrompt(turns, personaA)}`,
         },
       ],
       constraints: { maxOutputTokens: 180, temperature: 0.4 },
@@ -94,7 +102,7 @@ export const runBoundedConversation = async (
     const rawTurn: ConversationTurn = {
       speakerAgentId: speaker.agentId,
       turnIndex,
-      content: response.text,
+      content: response.text.replace(/^\s*agent\s+[ab]\s*:\s*/iu, ''),
     };
     const unsafe = moderationFlag(rawTurn.content);
     if (unsafe !== null || rawTurn.content.startsWith('END_UNSAFE')) {
@@ -143,7 +151,7 @@ export const runBoundedConversation = async (
         content:
           'You are an independent compatibility judge. Read only the redacted transcript. Return JSON with integer score 0-100, exactly three concrete reasons, flags, suggestedFirstActivity, and oneLineReason. Never infer identity.',
       },
-      { role: 'user', content: transcriptForPrompt(turns) },
+      { role: 'user', content: transcriptForPrompt(turns, personaA) },
     ],
     constraints: { maxOutputTokens: 700, temperature: 0.1, jsonMode: true },
     userId: options.userId,
