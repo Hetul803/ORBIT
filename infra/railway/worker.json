@@ -1,0 +1,20 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "builder": "DOCKERFILE",
+    "dockerfilePath": "infra/Dockerfile.worker",
+    "watchPatterns": [
+      "apps/worker/**",
+      "packages/**",
+      "infra/Dockerfile.worker",
+      "package.json",
+      "pnpm-lock.yaml",
+      "pnpm-workspace.yaml",
+      "turbo.json"
+    ]
+  },
+  "deploy": {
+    "startCommand": "pnpm --filter @orbit/worker start",
+    "restartPolicyType": "ALWAYS"
+  }
+}

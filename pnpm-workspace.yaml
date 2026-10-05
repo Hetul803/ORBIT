@@ -11,6 +11,7 @@ overrides:
 allowBuilds:
   '@google/genai': true
   '@prisma/engines': true
+  '@sentry/cli': true
   esbuild: true
   msgpackr-extract: true
   prisma: true
@@ -41,6 +42,7 @@ minimumReleaseAgeExclude:
 
 onlyBuiltDependencies:
   - '@prisma/engines'
+  - '@sentry/cli'
   - prisma
   - esbuild
   - msgpackr-extract

@@ -7,13 +7,21 @@
     "scheme": "orbit",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "icon": "./assets/orbit-ring-icon.png",
     "ios": {
-      "supportsTablet": true,
-      "bundleIdentifier": "com.orbit.companion"
+      "supportsTablet": false,
+      "bundleIdentifier": "com.orbit.companion",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "ORBIT uses the microphone only when you tap and hold to ask a question."
+      }
     },
     "android": {
       "package": "com.orbit.companion",
+      "versionCode": 1,
+      "permissions": ["RECORD_AUDIO", "POST_NOTIFICATIONS"],
       "adaptiveIcon": {
+        "foregroundImage": "./assets/orbit-ring-icon.png",
         "backgroundColor": "#F7F5F0"
       }
     },
@@ -29,6 +37,8 @@
       [
         "expo-splash-screen",
         {
+          "image": "./assets/orbit-ring-splash.png",
+          "resizeMode": "contain",
           "backgroundColor": "#F7F5F0"
         }
       ]

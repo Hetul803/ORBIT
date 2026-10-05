@@ -12,6 +12,7 @@ import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, type ReactNode } from 'react';
+import * as Sentry from '@sentry/react-native';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { useOrbitTheme } from '@orbit/ui';
 
@@ -21,7 +22,17 @@ import { useAuthStore } from '@/store';
 
 void SplashScreen.preventAutoHideAsync();
 
-export default function RootLayout(): ReactNode {
+Sentry.init({
+  dsn: process.env.EXPO_PUBLIC_SENTRY_DSN,
+  enabled:
+    process.env.EXPO_PUBLIC_SENTRY_DSN !== undefined &&
+    process.env.EXPO_PUBLIC_SENTRY_DSN.length > 0,
+  environment: process.env.NODE_ENV,
+  tracesSampleRate: 0.1,
+  sendDefaultPii: false,
+});
+
+function RootLayout(): ReactNode {
   const hydrate = useAuthStore((state) => state.hydrate);
   const hydrated = useAuthStore((state) => state.hydrated);
   const accessToken = useAuthStore((state) => state.accessToken);
@@ -68,3 +79,5 @@ export default function RootLayout(): ReactNode {
     </QueryClientProvider>
   );
 }
+
+export default Sentry.wrap(RootLayout);
