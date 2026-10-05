@@ -38,9 +38,16 @@ const environmentSchema = z.object({
   ADMIN_EMAILS: z.string().default('admin@example.com'),
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_EMBEDDING_MODEL: z.string().default('text-embedding-3-small'),
+  OPENROUTER_API_KEY: z.string().optional(),
+  OPENROUTER_BASE_URL: z.url().default('https://openrouter.ai/api/v1'),
+  OPENROUTER_HTTP_REFERER: z.url().optional(),
+  OPENROUTER_APP_TITLE: z.string().default('ORBIT'),
+  OPENROUTER_EMBEDDING_MODEL: z.string().default('openai/text-embedding-3-small'),
   ANTHROPIC_API_KEY: z.string().optional(),
   GOOGLE_GENERATIVE_AI_API_KEY: z.string().optional(),
-  LLM_DEFAULT_PROVIDER: z.enum(['stub', 'openai', 'anthropic', 'google']).default('stub'),
+  LLM_DEFAULT_PROVIDER: z
+    .enum(['stub', 'openai', 'openrouter', 'anthropic', 'google'])
+    .default('stub'),
   USER_DAILY_COST_CAP_CENTS: z.coerce.number().nonnegative().default(35),
   GLOBAL_DAILY_COST_CAP_CENTS: z.coerce.number().nonnegative().default(2_500),
 });
@@ -48,4 +55,11 @@ const environmentSchema = z.object({
 export type ApiConfig = z.infer<typeof environmentSchema>;
 
 export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): ApiConfig =>
-  environmentSchema.parse(environment);
+  environmentSchema.parse({
+    ...environment,
+    // Railway injects PORT for the public service. API_PORT remains available
+    // for Docker/local use and wins when explicitly set.
+    ...(environment.API_PORT === undefined && environment.PORT !== undefined
+      ? { API_PORT: environment.PORT }
+      : {}),
+  });

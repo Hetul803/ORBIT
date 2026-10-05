@@ -143,6 +143,30 @@ enum ConnectionStatus {
   ERROR
 }
 
+enum SourceDocumentKind {
+  GMAIL_MESSAGE
+  GOOGLE_CALENDAR_EVENT
+}
+
+enum SourceDocumentDirection {
+  INBOUND
+  OUTBOUND
+  UNKNOWN
+}
+
+enum LifeItemKind {
+  CATCH
+  NUDGE
+  DRAFT
+}
+
+enum LifeItemStatus {
+  ACTIVE
+  DISMISSED
+  SNOOZED
+  COMPLETED
+}
+
 enum ActorType {
   USER
   AGENT
@@ -215,6 +239,8 @@ model User {
   otpChallenges         OtpChallenge[]
   refreshTokens         RefreshToken[]
   apiKeys               EncryptedApiKey[]
+  sourceDocuments       SourceDocument[]
+  lifeItems             LifeItem[]
   introductionsAsA      Introduction[]         @relation("IntroductionUserA")
   introductionsAsB      Introduction[]         @relation("IntroductionUserB")
   moderationActions     ModerationAction[]      @relation("Moderator")
@@ -739,6 +765,55 @@ model Connection {
   @@unique([userId, provider])
   @@index([userId])
   @@index([status])
+}
+
+model SourceDocument {
+  id          String                  @id @default(cuid())
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
+  deletedAt   DateTime?
+  userId      String
+  kind        SourceDocumentKind
+  direction   SourceDocumentDirection @default(UNKNOWN)
+  externalId  String
+  threadId    String?
+  sourceUrl   String
+  title       String
+  sender      String?
+  recipients  String?
+  occurredAt  DateTime?
+  body        String
+  metadata    Json                    @default("{}")
+  lastSyncedAt DateTime               @default(now())
+  user        User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, kind, externalId])
+  @@index([userId, kind, occurredAt])
+  @@index([userId, threadId])
+  @@index([userId, direction, occurredAt])
+}
+
+model LifeItem {
+  id           String         @id @default(cuid())
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  deletedAt    DateTime?
+  userId       String
+  kind         LifeItemKind
+  status       LifeItemStatus @default(ACTIVE)
+  stableKey    String
+  title        String
+  detail       String
+  evidence     Json
+  confidence   Float
+  dueAt        DateTime?
+  snoozedUntil DateTime?
+  draft        String?
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, stableKey])
+  @@index([userId, status, dueAt])
+  @@index([userId, kind, createdAt])
 }
 
 model ActivityLog {

@@ -20,6 +20,35 @@ export interface DailyBrief {
   items: BriefItem[];
 }
 
+export interface SourceCitation {
+  sourceId: string;
+  kind: 'email' | 'calendar';
+  title: string;
+  url: string;
+  quote: string;
+  occurredAt: string | null;
+}
+
+export interface LifeItem {
+  id: string;
+  kind: 'catch' | 'nudge' | 'draft';
+  status: 'active' | 'dismissed' | 'snoozed' | 'completed';
+  title: string;
+  detail: string;
+  evidence: SourceCitation[];
+  confidence: number;
+  dueAt: string | null;
+  snoozedUntil: string | null;
+  draft: string | null;
+  createdAt: string;
+}
+
+export interface LifeAnswer {
+  answer: string;
+  sources: SourceCitation[];
+  confidence: number;
+}
+
 export interface Introduction {
   id: string;
   intentKind: string;

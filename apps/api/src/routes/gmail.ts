@@ -1,15 +1,25 @@
 import { randomBytes } from 'node:crypto';
 
-import { ConnectionProvider, ConnectionStatus, InboxTriage, queuePush } from '@orbit/db';
+import {
+  ConnectionProvider,
+  ConnectionStatus,
+  InboxTriage,
+  SourceDocumentDirection,
+  SourceDocumentKind,
+  queuePush,
+} from '@orbit/db';
 import type { FastifyInstance } from 'fastify';
 
 import { requireAuth } from '../auth.js';
 import { decryptField, encryptField, sha256 } from '../crypto.js';
 import { ApiError } from '../errors.js';
+import { refreshLifeItems } from '../life.js';
 import type { Services } from '../services.js';
 import { asRecord, logActivity } from './helpers.js';
 
 const gmailReadonlyScope = 'https://www.googleapis.com/auth/gmail.readonly';
+const calendarReadonlyScope = 'https://www.googleapis.com/auth/calendar.readonly';
+const googleReadonlyScopes = [gmailReadonlyScope, calendarReadonlyScope] as const;
 
 interface StoredTokens {
   refreshToken: string;
@@ -48,8 +58,17 @@ const tokenRequest = async (
     signal: AbortSignal.timeout(10_000),
   });
   const body: unknown = await response.json();
-  if (!response.ok)
+  if (!response.ok) {
+    const record = asRecord(body);
+    if (record.error === 'invalid_grant') {
+      throw new ApiError(
+        409,
+        'GMAIL_RECONNECT_REQUIRED',
+        'Google access expired. Reconnect Gmail to continue.',
+      );
+    }
     throw new ApiError(502, 'GOOGLE_OAUTH_FAILED', 'Google did not complete authorization.');
+  }
   return asRecord(body);
 };
 
@@ -60,10 +79,21 @@ const accessTokenFor = async (
   const stored = JSON.parse(
     decryptField(connection.encryptedTokens, services.config.FIELD_ENCRYPTION_KEY),
   ) as StoredTokens;
-  const refreshed = await tokenRequest(services, {
-    grant_type: 'refresh_token',
-    refresh_token: stored.refreshToken,
-  });
+  let refreshed: Record<string, unknown>;
+  try {
+    refreshed = await tokenRequest(services, {
+      grant_type: 'refresh_token',
+      refresh_token: stored.refreshToken,
+    });
+  } catch (error: unknown) {
+    if (error instanceof ApiError && error.code === 'GMAIL_RECONNECT_REQUIRED') {
+      await services.db.connection.update({
+        where: { id: connection.id },
+        data: { status: ConnectionStatus.EXPIRED },
+      });
+    }
+    throw error;
+  }
   if (typeof refreshed.access_token !== 'string') {
     throw new ApiError(502, 'GOOGLE_TOKEN_FAILED', 'Google did not return an access token.');
   }
@@ -90,6 +120,17 @@ const gmailJson = async (path: string, accessToken: string): Promise<Record<stri
   const body: unknown = await response.json();
   if (!response.ok)
     throw new ApiError(502, 'GMAIL_READ_FAILED', 'Gmail could not be read right now.');
+  return asRecord(body);
+};
+
+const googleJson = async (url: string, accessToken: string): Promise<Record<string, unknown>> => {
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    signal: AbortSignal.timeout(10_000),
+  });
+  const body: unknown = await response.json();
+  if (!response.ok)
+    throw new ApiError(502, 'GOOGLE_READ_FAILED', 'Google data could not be read right now.');
   return asRecord(body);
 };
 
@@ -137,6 +178,117 @@ const ruleMatches = (matchOn: Record<string, unknown>, from: string, subject: st
   );
 };
 
+const emailAddress = (value: string): string => {
+  const bracketed = /<([^>]+)>/u.exec(value)?.[1];
+  return (bracketed ?? value).trim().toLowerCase();
+};
+
+const parseMessageDate = (value: string): Date | null => {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const gmailMessageSourceUrl = (messageId: string): string =>
+  `https://mail.google.com/mail/u/0/#all/${encodeURIComponent(messageId)}`;
+
+const gmailMessagesForCatch = async (
+  accessToken: string,
+): Promise<readonly Record<string, unknown>[]> => {
+  const messages: Record<string, unknown>[] = [];
+  let pageToken: string | undefined;
+  // Gmail returns newest-first. Five pages at the API maximum keeps the first
+  // sync useful for active inboxes while making its bounded cost explicit.
+  for (let page = 0; page < 5; page += 1) {
+    const params = new URLSearchParams({ maxResults: '500', q: 'newer_than:90d' });
+    if (pageToken !== undefined) params.set('pageToken', pageToken);
+    const list = await gmailJson(`/messages?${params.toString()}`, accessToken);
+    const entries = Array.isArray(list.messages) ? list.messages : [];
+    messages.push(...entries.map(asRecord));
+    pageToken = typeof list.nextPageToken === 'string' ? list.nextPageToken : undefined;
+    if (pageToken === undefined) break;
+  }
+  return messages;
+};
+
+const syncCalendar = async (
+  services: Services,
+  userId: string,
+  accessToken: string,
+): Promise<number> => {
+  const start = new Date();
+  const end = new Date(start.getTime() + 14 * 86_400_000);
+  const params = new URLSearchParams({
+    singleEvents: 'true',
+    orderBy: 'startTime',
+    timeMin: start.toISOString(),
+    timeMax: end.toISOString(),
+    maxResults: '250',
+  });
+  const payload = await googleJson(
+    `https://www.googleapis.com/calendar/v3/calendars/primary/events?${params.toString()}`,
+    accessToken,
+  );
+  const events = Array.isArray(payload.items) ? payload.items.map(asRecord) : [];
+  let imported = 0;
+  for (const event of events) {
+    const id = typeof event.id === 'string' ? event.id : undefined;
+    if (id === undefined) continue;
+    const startData = asRecord(event.start);
+    const endData = asRecord(event.end);
+    const startValue =
+      typeof startData.dateTime === 'string'
+        ? startData.dateTime
+        : typeof startData.date === 'string'
+          ? `${startData.date}T00:00:00.000Z`
+          : undefined;
+    const endValue =
+      typeof endData.dateTime === 'string'
+        ? endData.dateTime
+        : typeof endData.date === 'string'
+          ? `${endData.date}T00:00:00.000Z`
+          : undefined;
+    if (startValue === undefined || endValue === undefined) continue;
+    const title = typeof event.summary === 'string' ? event.summary : '(Untitled event)';
+    const description =
+      typeof event.description === 'string' ? event.description.slice(0, 8_000) : '';
+    const sourceUrl =
+      typeof event.htmlLink === 'string'
+        ? event.htmlLink
+        : `https://calendar.google.com/calendar/u/0/r/search?q=${encodeURIComponent(title)}`;
+    await services.db.sourceDocument.upsert({
+      where: {
+        userId_kind_externalId: {
+          userId,
+          kind: SourceDocumentKind.GOOGLE_CALENDAR_EVENT,
+          externalId: id,
+        },
+      },
+      update: {
+        sourceUrl,
+        title,
+        occurredAt: new Date(startValue),
+        body: description,
+        metadata: { start: startValue, end: endValue, status: event.status ?? null },
+        lastSyncedAt: new Date(),
+        deletedAt: null,
+      },
+      create: {
+        userId,
+        kind: SourceDocumentKind.GOOGLE_CALENDAR_EVENT,
+        direction: SourceDocumentDirection.UNKNOWN,
+        externalId: id,
+        sourceUrl,
+        title,
+        occurredAt: new Date(startValue),
+        body: description,
+        metadata: { start: startValue, end: endValue, status: event.status ?? null },
+      },
+    });
+    imported += 1;
+  }
+  return imported;
+};
+
 export const registerGmailRoutes = (app: FastifyInstance, services: Services): void => {
   app.get('/v1/connections/gmail/status', async (request) => {
     const auth = await requireAuth(request, services.config);
@@ -151,6 +303,8 @@ export const registerGmailRoutes = (app: FastifyInstance, services: Services): v
         : 'The operator has not enabled a verified Google OAuth application.',
       connected:
         connection !== null && connection.deletedAt === null && connection.status === 'ACTIVE',
+      reconnectRequired:
+        connection !== null && connection.deletedAt === null && connection.status === 'EXPIRED',
       connection:
         connection?.deletedAt === null
           ? {
@@ -182,7 +336,7 @@ export const registerGmailRoutes = (app: FastifyInstance, services: Services): v
       client_id: services.config.GOOGLE_OAUTH_CLIENT_ID ?? '',
       redirect_uri: services.config.GOOGLE_OAUTH_REDIRECT_URI ?? '',
       response_type: 'code',
-      scope: gmailReadonlyScope,
+      scope: googleReadonlyScopes.join(' '),
       access_type: 'offline',
       prompt: 'consent',
       include_granted_scopes: 'false',
@@ -227,8 +381,12 @@ export const registerGmailRoutes = (app: FastifyInstance, services: Services): v
       );
     }
     const grantedScopes = typeof token.scope === 'string' ? token.scope.split(' ') : [];
-    if (!grantedScopes.includes(gmailReadonlyScope)) {
-      throw new ApiError(403, 'GMAIL_SCOPE_MISSING', 'Gmail read-only permission was not granted.');
+    if (!googleReadonlyScopes.every((scope) => grantedScopes.includes(scope))) {
+      throw new ApiError(
+        403,
+        'GOOGLE_SCOPE_MISSING',
+        'Gmail and Calendar read-only permissions were not both granted.',
+      );
     }
     const stored: StoredTokens = {
       refreshToken: token.refresh_token,
@@ -243,7 +401,7 @@ export const registerGmailRoutes = (app: FastifyInstance, services: Services): v
       where: { userId_provider: { userId: challenge.userId, provider: ConnectionProvider.GOOGLE } },
       update: {
         encryptedTokens,
-        scopes: [gmailReadonlyScope],
+        scopes: [...googleReadonlyScopes],
         status: ConnectionStatus.ACTIVE,
         deletedAt: null,
       },
@@ -251,7 +409,7 @@ export const registerGmailRoutes = (app: FastifyInstance, services: Services): v
         userId: challenge.userId,
         provider: ConnectionProvider.GOOGLE,
         encryptedTokens,
-        scopes: [gmailReadonlyScope],
+        scopes: [...googleReadonlyScopes],
       },
     });
     await services.db.$transaction([
@@ -266,7 +424,7 @@ export const registerGmailRoutes = (app: FastifyInstance, services: Services): v
           action: 'connection.gmail_connected',
           targetType: 'Connection',
           targetId: connection.id,
-          payload: { scopes: [gmailReadonlyScope] },
+          payload: { scopes: googleReadonlyScopes },
         },
       }),
     ]);
@@ -287,21 +445,34 @@ export const registerGmailRoutes = (app: FastifyInstance, services: Services): v
     if (connection === null)
       throw new ApiError(409, 'GMAIL_NOT_CONNECTED', 'Connect Gmail before syncing.');
     const accessToken = await accessTokenFor(services, connection);
-    const list = await gmailJson('/messages?maxResults=10&q=newer_than%3A30d', accessToken);
-    const messages = Array.isArray(list.messages) ? list.messages : [];
+    const profile = await gmailJson('/profile', accessToken);
+    const accountEmail =
+      typeof profile.emailAddress === 'string' ? profile.emailAddress.toLowerCase() : '';
+    const messages = await gmailMessagesForCatch(accessToken);
     const rules = await services.db.screeningRule.findMany({
       where: { userId: auth.id, deletedAt: null },
       orderBy: { priority: 'asc' },
     });
     let imported = 0;
-    for (const summary of messages.slice(0, 10)) {
-      const messageId = asRecord(summary).id;
+    let inboxImported = 0;
+    for (const summary of messages) {
+      const messageId = summary.id;
       if (typeof messageId !== 'string') continue;
+      const sourceExists = await services.db.sourceDocument.findUnique({
+        where: {
+          userId_kind_externalId: {
+            userId: auth.id,
+            kind: SourceDocumentKind.GMAIL_MESSAGE,
+            externalId: messageId,
+          },
+        },
+        select: { id: true },
+      });
+      if (sourceExists !== null) continue;
       const kind = `gmail:${messageId}`;
       const existing = await services.db.inboxItem.findFirst({
         where: { recipientUserId: auth.id, kind },
       });
-      if (existing !== null) continue;
       const message = await gmailJson(
         `/messages/${encodeURIComponent(messageId)}?format=full`,
         accessToken,
@@ -309,8 +480,37 @@ export const registerGmailRoutes = (app: FastifyInstance, services: Services): v
       const payload = asRecord(message.payload);
       const subject = headerValue(payload, 'Subject') || '(No subject)';
       const from = headerValue(payload, 'From');
+      const to = headerValue(payload, 'To');
+      const date = parseMessageDate(headerValue(payload, 'Date'));
       const snippet = typeof message.snippet === 'string' ? message.snippet : '';
       const body = (plainBody(payload) || snippet).slice(0, 8_000);
+      const direction =
+        accountEmail.length > 0 && emailAddress(from) === accountEmail
+          ? SourceDocumentDirection.OUTBOUND
+          : SourceDocumentDirection.INBOUND;
+      const threadId = typeof message.threadId === 'string' ? message.threadId : undefined;
+      await services.db.sourceDocument.create({
+        data: {
+          userId: auth.id,
+          kind: SourceDocumentKind.GMAIL_MESSAGE,
+          direction,
+          externalId: messageId,
+          ...(threadId === undefined ? {} : { threadId }),
+          sourceUrl: gmailMessageSourceUrl(messageId),
+          title: subject,
+          sender: from || null,
+          recipients: to || null,
+          ...(date === null ? {} : { occurredAt: date }),
+          body,
+          metadata: {
+            labels: Array.isArray(message.labelIds) ? message.labelIds : [],
+            gmailInternalDate:
+              typeof message.internalDate === 'string' ? message.internalDate : null,
+          },
+        },
+      });
+      imported += 1;
+      if (direction !== SourceDocumentDirection.INBOUND || existing !== null) continue;
       const rule = rules.find((candidate) =>
         ruleMatches(asRecord(candidate.matchOn), from, subject),
       );
@@ -321,27 +521,6 @@ export const registerGmailRoutes = (app: FastifyInstance, services: Services): v
           : action === 'ALLOW'
             ? InboxTriage.ESCALATED
             : InboxTriage.HELD;
-      let draft: string | null = null;
-      if (triage !== InboxTriage.AUTO_DECLINED && services.config.LLM_DEFAULT_PROVIDER !== 'stub') {
-        const completion = await services.llm.complete({
-          task: 'draft',
-          userId: auth.id,
-          messages: [
-            {
-              role: 'system',
-              content:
-                'Draft a concise email reply. Do not claim it was sent and do not invent facts.',
-            },
-            {
-              role: 'user',
-              content: `From: ${from}\nSubject: ${subject}\nBody:\n${body.slice(0, 6_000)}`,
-            },
-          ],
-          constraints: { maxOutputTokens: 400, temperature: 0.2 },
-          requestId: request.id,
-        });
-        draft = completion.text;
-      }
       await services.db.inboxItem.create({
         data: {
           recipientUserId: auth.id,
@@ -349,7 +528,7 @@ export const registerGmailRoutes = (app: FastifyInstance, services: Services): v
           subject,
           body: `From: ${from}\n\n${body}`,
           triage,
-          agentReply: draft,
+          agentReply: null,
         },
       });
       if (triage === InboxTriage.ESCALATED) {
@@ -361,8 +540,10 @@ export const registerGmailRoutes = (app: FastifyInstance, services: Services): v
           deepLink: 'orbit://inbox',
         });
       }
-      imported += 1;
+      inboxImported += 1;
     }
+    const calendarImported = await syncCalendar(services, auth.id, accessToken);
+    const caught = await refreshLifeItems(services, auth.id);
     await services.db.connection.update({
       where: { id: connection.id },
       data: { lastSyncedAt: new Date() },
@@ -373,10 +554,17 @@ export const registerGmailRoutes = (app: FastifyInstance, services: Services): v
       action: 'connection.gmail_synced',
       targetType: 'Connection',
       targetId: connection.id,
-      payload: { imported },
+      payload: { imported, inboxImported, calendarImported, caught, daysRead: 90 },
       requestId: request.id,
     });
-    return { ok: true, imported, examined: messages.length };
+    return {
+      ok: true,
+      imported,
+      inboxImported,
+      calendarImported,
+      caught,
+      examined: messages.length,
+    };
   });
 
   app.delete('/v1/connections/gmail', async (request, reply) => {

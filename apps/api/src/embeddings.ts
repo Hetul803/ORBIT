@@ -32,18 +32,36 @@ export const createEmbedding = async (
   services: Services,
   text: string,
 ): Promise<readonly number[] | null> => {
-  const key = services.config.OPENAI_API_KEY;
+  const useOpenRouter =
+    services.config.OPENROUTER_API_KEY !== undefined &&
+    services.config.OPENROUTER_API_KEY.length > 0;
+  const key = useOpenRouter ? services.config.OPENROUTER_API_KEY : services.config.OPENAI_API_KEY;
   if (key === undefined || key.length === 0) return null;
-  const response = await fetch('https://api.openai.com/v1/embeddings', {
-    method: 'POST',
-    headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
-    body: JSON.stringify({
-      model: services.config.OPENAI_EMBEDDING_MODEL,
-      input: text.slice(0, 24_000),
-      encoding_format: 'float',
-    }),
-    signal: AbortSignal.timeout(EMBEDDING_TIMEOUT_MS),
-  });
+  const response = await fetch(
+    useOpenRouter
+      ? `${services.config.OPENROUTER_BASE_URL}/embeddings`
+      : 'https://api.openai.com/v1/embeddings',
+    {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${key}`,
+        'content-type': 'application/json',
+        ...(useOpenRouter && services.config.OPENROUTER_HTTP_REFERER !== undefined
+          ? { 'HTTP-Referer': services.config.OPENROUTER_HTTP_REFERER }
+          : {}),
+        ...(useOpenRouter ? { 'X-OpenRouter-Title': services.config.OPENROUTER_APP_TITLE } : {}),
+      },
+      body: JSON.stringify({
+        model: useOpenRouter
+          ? services.config.OPENROUTER_EMBEDDING_MODEL
+          : services.config.OPENAI_EMBEDDING_MODEL,
+        input: text.slice(0, 24_000),
+        encoding_format: 'float',
+        ...(useOpenRouter ? { dimensions: EMBEDDING_DIMENSIONS } : {}),
+      }),
+      signal: AbortSignal.timeout(EMBEDDING_TIMEOUT_MS),
+    },
+  );
   if (!response.ok) {
     throw new Error(`Embedding provider returned HTTP ${String(response.status)}`);
   }

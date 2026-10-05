@@ -21,6 +21,7 @@ import {
 import { api } from '@/api';
 import { AppHeader, EmptyState, Metric, QueryError } from '@/components';
 import type { BriefItem, DailyBrief } from '@/types';
+import type { LifeItem } from '@/types';
 
 const BriefCard = ({ item }: { item: BriefItem }): ReactNode => (
   <Pressable
@@ -62,6 +63,10 @@ export default function Today(): ReactNode {
     queryKey: ['brief', 'today'],
     queryFn: () => api<DailyBrief>('/v1/brief/today'),
   });
+  const catchQuery = useQuery({
+    queryKey: ['life', 'catch'],
+    queryFn: () => api<LifeItem[]>('/v1/life/catch'),
+  });
   const brief = query.data;
   return (
     <Screen scroll={false} contentStyle={styles.screen}>
@@ -101,6 +106,36 @@ export default function Today(): ReactNode {
                   />
                 </View>
               </Card>
+            )}
+            {catchQuery.data === undefined || catchQuery.isError ? null : (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Open Catch"
+                onPress={() => router.push('/catch')}
+                style={({ pressed }) => pressed && styles.pressed}
+              >
+                <Card
+                  tone={catchQuery.data.length > 0 ? 'ember' : 'paper'}
+                  style={styles.catchCard}
+                >
+                  <View style={styles.cardTop}>
+                    <OrbitText variant="mono">CATCH</OrbitText>
+                    <Pill tone={catchQuery.data.length > 0 ? 'ember' : 'neutral'}>
+                      {String(catchQuery.data.length)} ACTIVE
+                    </Pill>
+                  </View>
+                  <OrbitText variant="title">
+                    {catchQuery.data.length > 0
+                      ? (catchQuery.data[0]?.title ?? 'Review your Catch')
+                      : 'Nothing needs a follow-up'}
+                  </OrbitText>
+                  <OrbitText>
+                    {catchQuery.data.length > 0
+                      ? 'Open source-backed emails, commitments, calendar conflicts, and drafts.'
+                      : 'Connect Gmail and Calendar when you are ready.'}
+                  </OrbitText>
+                </Card>
+              </Pressable>
             )}
             <SectionHeader
               eyebrow="DAILY BRIEF"
@@ -150,6 +185,7 @@ const styles = StyleSheet.create({
   separator: { height: spacing.md },
   loading: { gap: spacing.md },
   summary: { paddingVertical: spacing.xl },
+  catchCard: { gap: spacing.sm },
   metrics: { flexDirection: 'row', gap: spacing.lg, marginTop: spacing.sm },
   cardTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   receipt: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, marginTop: spacing.sm },

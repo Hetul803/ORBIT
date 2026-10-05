@@ -87,6 +87,59 @@ export class OpenAiProvider implements LlmProvider {
   }
 }
 
+/**
+ * OpenRouter exposes an OpenAI-compatible chat-completions endpoint. Keeping it
+ * as a separate provider makes model receipts and per-provider user keys
+ * truthful instead of labelling OpenRouter traffic as OpenAI traffic.
+ */
+export class OpenRouterProvider implements LlmProvider {
+  public readonly name = 'openrouter';
+
+  public constructor(
+    private readonly platformApiKey: string | undefined,
+    private readonly options: {
+      readonly baseUrl?: string;
+      readonly httpReferer?: string;
+      readonly appTitle?: string;
+    } = {},
+  ) {}
+
+  public async complete(request: ProviderRequest): Promise<ProviderResponse> {
+    const apiKey = request.apiKeyOverride ?? this.platformApiKey;
+    if (!apiKey) throw new Error('OPENROUTER_API_KEY is not configured');
+    const client = new OpenAI({
+      apiKey,
+      baseURL: this.options.baseUrl ?? 'https://openrouter.ai/api/v1',
+      defaultHeaders: {
+        ...(this.options.httpReferer === undefined || this.options.httpReferer.length === 0
+          ? {}
+          : { 'HTTP-Referer': this.options.httpReferer }),
+        ...(this.options.appTitle === undefined || this.options.appTitle.length === 0
+          ? {}
+          : { 'X-OpenRouter-Title': this.options.appTitle }),
+      },
+    });
+    const result = await client.chat.completions.create({
+      model: request.model,
+      messages: request.messages.map((message) => ({
+        role: message.role,
+        content: message.content,
+      })),
+      max_tokens: request.constraints.maxOutputTokens,
+      temperature: request.constraints.temperature,
+      ...(request.constraints.jsonMode === true
+        ? { response_format: { type: 'json_object' as const } }
+        : {}),
+    });
+    const text = result.choices[0]?.message.content ?? '';
+    return {
+      text,
+      tokensIn: result.usage?.prompt_tokens ?? estimateTokens(flattenMessages(request.messages)),
+      tokensOut: result.usage?.completion_tokens ?? estimateTokens(text),
+    };
+  }
+}
+
 export class AnthropicProvider implements LlmProvider {
   public readonly name = 'anthropic';
 

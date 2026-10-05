@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Linking } from 'react-native';
 import { Button, Card, OrbitText, Pill, Ring, Screen } from '@orbit/ui';
 
@@ -19,6 +19,7 @@ interface GmailStatus {
   available: boolean;
   unavailableReason: string | null;
   connected: boolean;
+  reconnectRequired: boolean;
   connection: Connection | null;
 }
 
@@ -36,6 +37,17 @@ export default function Connections(): ReactNode {
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const subscription = Linking.addEventListener('url', (event) => {
+      const url = new URL(event.url);
+      if (url.protocol === 'orbit:' && url.searchParams.get('gmail') === 'connected') {
+        setMessage('Google connected. Syncing your last 90 days now…');
+        void refresh().then(() => void sync());
+      }
+    });
+    return () => subscription.remove();
+  }, []);
 
   const refresh = async (): Promise<void> => {
     await Promise.all([query.refetch(), gmail.refetch()]);
@@ -59,14 +71,20 @@ export default function Connections(): ReactNode {
     setBusy(true);
     setError(null);
     try {
-      const result = await api<{ imported: number; examined: number }>(
-        '/v1/connections/gmail/sync',
-        { method: 'POST' },
-      );
+      const result = await api<{
+        imported: number;
+        examined: number;
+        calendarImported: number;
+        caught: number;
+      }>('/v1/connections/gmail/sync', { method: 'POST' });
       setMessage(
-        `Examined ${String(result.examined)} recent messages and imported ${String(result.imported)} new items.`,
+        `Read ${String(result.examined)} Gmail messages from the last 90 days, added ${String(result.imported)} new mail records and ${String(result.calendarImported)} calendar events, and found ${String(result.caught)} Catch items.`,
       );
-      await Promise.all([client.invalidateQueries({ queryKey: ['inbox'] }), refresh()]);
+      await Promise.all([
+        client.invalidateQueries({ queryKey: ['inbox'] }),
+        client.invalidateQueries({ queryKey: ['life', 'catch'] }),
+        refresh(),
+      ]);
     } catch (caught: unknown) {
       setError(caught instanceof Error ? caught.message : 'Could not sync Gmail.');
     } finally {
@@ -96,7 +114,7 @@ export default function Connections(): ReactNode {
       />
       <Notice
         title="Read narrowly; delivery stays off"
-        detail="Gmail requests read-only access. ORBIT can triage and draft, but this build never sends email or expands scope silently."
+        detail="Gmail and Google Calendar are read-only. ORBIT can surface source-backed follow-ups and drafts, but it never sends mail, edits events, or expands scope silently."
         tone="moss"
       />
       {gmail.isError ? (
@@ -112,10 +130,11 @@ export default function Connections(): ReactNode {
             GMAIL ·{' '}
             {gmail.data.connected ? 'CONNECTED' : gmail.data.available ? 'READY' : 'UNAVAILABLE'}
           </Pill>
-          <OrbitText variant="title">Read-only Gmail triage</OrbitText>
+          <OrbitText variant="title">Read-only Gmail + Calendar</OrbitText>
           {gmail.data.available ? (
             <OrbitText>
-              Scope: gmail.readonly. Refresh tokens are encrypted and can be revoked here.
+              Scopes: gmail.readonly and calendar.readonly. Refresh tokens are encrypted and can be
+              revoked here.
             </OrbitText>
           ) : (
             <OrbitText>{gmail.data.unavailableReason}</OrbitText>
@@ -129,7 +148,7 @@ export default function Connections(): ReactNode {
                   ? 'Never'
                   : new Date(gmail.data.connection.lastSyncedAt).toLocaleString()}
               </OrbitText>
-              <Button label="Sync 10 recent messages" onPress={() => void sync()} loading={busy} />
+              <Button label="Sync Gmail + Calendar" onPress={() => void sync()} loading={busy} />
               {confirmDisconnect ? (
                 <>
                   <OrbitText variant="label">
@@ -157,7 +176,7 @@ export default function Connections(): ReactNode {
             </>
           ) : (
             <Button
-              label="Connect Gmail read-only"
+              label={gmail.data.reconnectRequired ? 'Reconnect Google' : 'Connect Google read-only'}
               onPress={() => void connect()}
               disabled={!gmail.data.available}
               loading={busy}

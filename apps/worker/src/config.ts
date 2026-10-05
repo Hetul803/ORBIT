@@ -5,8 +5,14 @@ const schema = z.object({
   SENTRY_DSN: z.url().optional(),
   SENTRY_ENVIRONMENT: z.string().default('development'),
   REDIS_URL: z.string().default('redis://localhost:6379'),
-  LLM_DEFAULT_PROVIDER: z.enum(['stub', 'openai', 'anthropic', 'google']).default('stub'),
+  LLM_DEFAULT_PROVIDER: z
+    .enum(['stub', 'openai', 'openrouter', 'anthropic', 'google'])
+    .default('stub'),
   OPENAI_API_KEY: z.string().optional(),
+  OPENROUTER_API_KEY: z.string().optional(),
+  OPENROUTER_BASE_URL: z.url().default('https://openrouter.ai/api/v1'),
+  OPENROUTER_HTTP_REFERER: z.url().optional(),
+  OPENROUTER_APP_TITLE: z.string().default('ORBIT'),
   ANTHROPIC_API_KEY: z.string().optional(),
   GOOGLE_GENERATIVE_AI_API_KEY: z.string().optional(),
   FIELD_ENCRYPTION_KEY: z.string().default('AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='),

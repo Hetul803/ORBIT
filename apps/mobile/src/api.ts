@@ -7,9 +7,7 @@ import { resolveApiUrl } from './api-url';
 
 export { resolveApiUrl } from './api-url';
 
-const developmentHost =
-  Constants.expoConfig?.hostUri ??
-  (Constants.expoGoConfig as { debuggerHost?: string } | null)?.debuggerHost;
+const developmentHost = Constants.expoConfig?.hostUri ?? Constants.expoGoConfig?.debuggerHost;
 
 export const configuredApiUrl = resolveApiUrl({
   ...(process.env.EXPO_PUBLIC_API_URL === undefined

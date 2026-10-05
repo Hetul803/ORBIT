@@ -18,6 +18,7 @@ import { ApiError } from './errors.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerCoreRoutes } from './routes/core.js';
 import { registerGmailRoutes } from './routes/gmail.js';
+import { registerLifeRoutes } from './routes/life.js';
 import { registerPushRoutes } from './routes/push.js';
 import { registerSafetyRoutes } from './routes/safety.js';
 import { registerSocialRoutes } from './routes/social.js';
@@ -127,6 +128,7 @@ export const buildApp = async (db: PrismaClient, config: ApiConfig): Promise<Fas
   registerAuthRoutes(app, services);
   registerCoreRoutes(app, services);
   registerGmailRoutes(app, services);
+  registerLifeRoutes(app, services);
   registerPushRoutes(app, services);
   registerSocialRoutes(app, services);
   registerWorkRoutes(app, services);

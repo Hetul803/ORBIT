@@ -5,6 +5,7 @@ import {
   GoogleProvider,
   ModelRouter,
   OpenAiProvider,
+  OpenRouterProvider,
   StubProvider,
   type LlmProvider,
 } from '@orbit/llm';
@@ -25,6 +26,16 @@ export const createServices = (db: PrismaClient, config: ApiConfig): Services =>
   const providers = new Map<string, LlmProvider>([
     ['stub', new StubProvider()],
     ['openai', new OpenAiProvider(config.OPENAI_API_KEY)],
+    [
+      'openrouter',
+      new OpenRouterProvider(config.OPENROUTER_API_KEY, {
+        baseUrl: config.OPENROUTER_BASE_URL,
+        appTitle: config.OPENROUTER_APP_TITLE,
+        ...(config.OPENROUTER_HTTP_REFERER === undefined
+          ? {}
+          : { httpReferer: config.OPENROUTER_HTTP_REFERER }),
+      }),
+    ],
     ['anthropic', new AnthropicProvider(config.ANTHROPIC_API_KEY)],
     ['google', new GoogleProvider(config.GOOGLE_GENERATIVE_AI_API_KEY)],
   ]);
