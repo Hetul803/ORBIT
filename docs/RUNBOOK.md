@@ -69,7 +69,7 @@ Never paste a secret into source control, a mobile `EXPO_PUBLIC_*` value, a GitH
 | `ALLOWED_ORIGINS`                                                                                  | API          | Comma-separated web origins only; native iOS/Android uses the HTTPS API directly.                                                                                            |
 | `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`                                                          | API          | Independently generated 32+ character random values from the company password manager.                                                                                       |
 | `FIELD_ENCRYPTION_KEY`                                                                             | API + worker | One base64 value that decodes to exactly 32 random bytes. It encrypts Google refresh tokens and user-supplied provider keys. Keep it stable while encrypted data exists.     |
-| `EXPORT_SIGNING_SECRET`                                                                            | API          | Independently generated 12+ character random value.                                                                                                                          |
+| `EXPORT_SIGNING_SECRET`                                                                            | API          | Independently generated 32+ character random value, distinct from development and JWT keys.                                                                                  |
 | `OTP_DELIVERY_MODE`, `RESEND_API_KEY`, `RESEND_FROM_EMAIL`                                         | API          | Resend verified sending domain and API key. Use `resend` outside local development.                                                                                          |
 | `PHONE_OTP_PROVIDER`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_PHONE`               | API          | Twilio account plus a verified SMS-capable number. Use `twilio` only after testing; do not retain `log` for a shared environment.                                            |
 | `GMAIL_INTEGRATION_ENABLED=true`                                                                   | API          | Set only once the Google OAuth client and exact HTTPS callback below are configured.                                                                                         |
@@ -90,6 +90,12 @@ Never paste a secret into source control, a mobile `EXPO_PUBLIC_*` value, a GitH
 
 Do not set `API_PORT` on Railway. Railway supplies `PORT`, and ORBIT maps it automatically. `EXPO_PUBLIC_API_URL`, `EXPO_PUBLIC_WS_URL`, `EXPO_PUBLIC_EAS_PROJECT_ID`, and `EXPO_PUBLIC_SENTRY_DSN` belong in EAS environments, not Railway; they are embedded in mobile builds and are not secret.
 
+Production API/worker start commands also require `SENTRY_ORG`, the service-specific `SENTRY_PROJECT`, private `SENTRY_AUTH_TOKEN`, and `SENTRY_RELEASE`. They inject debug IDs and upload source maps before boot; a missing value or upload failure stops startup. Configure and prove the release using the Sentry steps in `docs/LAUNCH_CHECKLIST.md`.
+
+`TRUSTED_PROXY_CIDRS` is blank by default so callers cannot spoof forwarding headers. Set only verified ingress addresses/CIDRs after confirming the hosting contract. Validate distinct client-IP limits from two networks before inviting the cohort.
+
+Model caps use atomic PostgreSQL budget reservations shared by API and worker, including embeddings, retries, and fallback attempts. Input allowance is conservatively estimated from UTF-8 bytes and message/tool overhead. Successful calls settle to measured usage; failed/ambiguous calls keep their allowance until the UTC day changes, so the dashboard can include reserved allowance as well as recorded cost. Verify `EMBEDDING_INPUT_COST_CENTS_PER_MILLION_TOKENS` is at least the selected model's current price. No software cap can bound provider charges if operator-supplied pricing is wrong.
+
 ### Google OAuth device callback
 
 The mobile flow is: ORBIT opens Google in the system browser → Google calls the HTTPS API callback → the API stores encrypted tokens → the API redirects to `orbit://connections?gmail=connected` → the app refreshes status and starts its first sync. ORBIT requests only `gmail.readonly` and `calendar.readonly`; it does not request send or calendar-write scopes.
@@ -104,7 +110,7 @@ The tracked [EAS profiles](/Users/hetulpatel/Documents/ORBIT/apps/mobile/eas.jso
 - `preview`: an installable internal Android **APK** and iOS ad-hoc build. It is not TestFlight.
 - `production`: an App Store distribution build for TestFlight internal testing. It is not an App Store submission.
 
-`Expo Go` cannot validate custom native modules such as Sentry, updates, microphone capture, widgets, Siri, Live Activities, or share extensions. Use a development build, preview build, or TestFlight build for those features.
+`Expo Go` does not validate this app's final native Sentry, updates, or notification integration. Use a development build, preview build, or TestFlight build. Push-to-talk, widgets, Siri, Live Activities, and share extensions remain unfinished; they are not features of this release.
 
 1. In `apps/mobile`, authenticate with the company Expo account, then run `pnpm dlx eas-cli@latest init`. Copy the returned EAS project UUID only into EAS environment variables as `EXPO_PUBLIC_EAS_PROJECT_ID`.
 2. Create EAS environments named `development`, `preview`, and `production`. Set `EXPO_PUBLIC_API_URL` to the matching HTTPS API domain, `EXPO_PUBLIC_WS_URL` to the matching `wss://` endpoint, `EXPO_PUBLIC_EAS_PROJECT_ID`, and `EXPO_PUBLIC_SENTRY_DSN` (public DSN). Do not set private server keys as `EXPO_PUBLIC_*` values.
@@ -114,7 +120,7 @@ The tracked [EAS profiles](/Users/hetulpatel/Documents/ORBIT/apps/mobile/eas.jso
 6. In App Store Connect: **Apps → ORBIT → TestFlight → iOS Builds**, wait for Processing; then click the **+** next to **Internal Testing**, create/select a group, add the founder's App Store Connect user, and add the processed build. The founder installs Apple’s TestFlight app, opens the invitation, and installs ORBIT. Do not select **App Store → Add for Review** in this pass.
 7. After `EXPO_PUBLIC_EAS_PROJECT_ID` exists, `app.config.ts` activates Expo Updates and uses the app-version runtime policy. Publish only a backward-compatible update with the matching environment: `pnpm dlx eas-cli@latest update --channel production --environment production --message "..."`.
 
-The app declares `com.orbit.companion`, version `0.1.0`/build `1`, the generated ORBIT Ring icon, warm-bone splash screen, `RECORD_AUDIO`/microphone usage language for a future push-to-talk control, and Android notification permission. It uses system color scheme, has accessible source links, and uses light haptics for Catch actions. A new native build is required after any permission, icon, plugin, or native-module change.
+The app declares `com.orbit.companion`, version `0.1.0`/build `1`, the ORBIT Ring icon, warm-bone splash screen, and Android notification permission. The unused microphone permission was removed in Pass 5. It uses system color scheme, has accessible source links, and uses light haptics for Catch actions. A new native build is required after any permission, icon, plugin, or native-module change.
 
 ## Private staging deployment
 
