@@ -60,15 +60,24 @@ export const regexRedact = (input: string): RedactionResult => {
       return replacementFor(rule.kind);
     });
   }
-  const hiddenContactLanguage =
-    /(?:spell(?:ed)? out|contact me|find me on|look me up|same username|digits are|number is)/iu.test(
-      input,
-    );
+  const evasivePatterns = [
+    { name: 'spelled_out_contact', pattern: /spell(?:ed)? out/iu },
+    { name: 'direct_contact_invitation', pattern: /contact me/iu },
+    { name: 'platform_lookup', pattern: /(?:find me on|look me up)/iu },
+    { name: 'username_reuse', pattern: /same username/iu },
+    { name: 'obfuscated_number', pattern: /(?:digits are|number is)/iu },
+  ] as const;
+  const evasive = evasivePatterns.find(({ pattern }) => pattern.test(input));
+  const hiddenContactLanguage = evasive !== undefined;
   return {
     passed: !hiddenContactLanguage,
     redacted,
     detected: [...detected],
     uncertain: hiddenContactLanguage,
+    failure:
+      evasive === undefined
+        ? null
+        : { category: 'evasive_contact_language', pattern: evasive.name, source: 'regex' },
   };
 };
 
@@ -125,11 +134,18 @@ export const redactMessage = async (
   });
   const modelResult = parseModelRedaction(response.text);
   if (modelResult === null || modelResult.uncertain || !modelResult.safe) {
+    const category =
+      modelResult === null
+        ? 'validator_output_invalid'
+        : modelResult.uncertain
+          ? 'validator_uncertain'
+          : 'validator_unsafe';
     return {
       passed: false,
       redacted: '',
       detected: regexResult.detected,
       uncertain: true,
+      failure: { category, pattern: category, source: 'model' },
     };
   }
   const secondRegexPass = regexRedact(modelResult.redacted);
@@ -138,6 +154,10 @@ export const redactMessage = async (
     redacted: secondRegexPass.redacted,
     detected: [...new Set([...regexResult.detected, ...secondRegexPass.detected])],
     uncertain: secondRegexPass.uncertain,
+    failure:
+      secondRegexPass.failure === null
+        ? null
+        : { ...secondRegexPass.failure, source: 'post_model_regex' },
   };
 };
 

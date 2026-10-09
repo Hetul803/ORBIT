@@ -42,6 +42,7 @@ export const rerankCandidates = async (
   context: {
     userId: string;
     runId: string;
+    requestId?: string;
     outcomeExamples?: readonly RerankOutcomeExample[];
   },
 ): Promise<readonly RerankedCandidate[]> => {

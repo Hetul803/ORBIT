@@ -74,6 +74,13 @@ export interface RedactionResult {
   readonly redacted: string;
   readonly detected: readonly PiiKind[];
   readonly uncertain: boolean;
+  readonly failure: RedactionFailureMetadata | null;
+}
+
+export interface RedactionFailureMetadata {
+  readonly category: string;
+  readonly pattern: string;
+  readonly source: 'regex' | 'model' | 'post_model_regex';
 }
 
 export interface ConversationResult {
@@ -83,6 +90,7 @@ export interface ConversationResult {
   readonly redactionPassed: boolean;
   readonly endReason: string | null;
   readonly modelCostCents: number;
+  readonly redactionFailure: (RedactionFailureMetadata & { readonly turnIndex: number }) | null;
 }
 
 export interface Completer {
@@ -95,6 +103,7 @@ export interface PipelineOptions {
   readonly userId: string;
   readonly runId: string;
   readonly conversationId: string;
+  readonly requestId?: string;
 }
 
 export interface ExperienceStep {

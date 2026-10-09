@@ -20,7 +20,7 @@ const completer: Completer = {
               suggestedFirstActivity: 'Coffee in a public campus cafe.',
               oneLineReason: 'A credible, low-pressure fit.',
             })
-          : 'I value reliable follow-through. What does a good first meeting look like?';
+          : 'A constraint for my user is that plans cannot be last-minute; however, a short scheduled meeting could work. What timing constraint matters to yours?';
     return Promise.resolve({
       text,
       provider: 'stub',
@@ -169,7 +169,8 @@ describe('bounded agent conversation', () => {
       endReason: 'agent_ended_no_match',
       redactionPassed: true,
     });
-    expect(result.turns).toHaveLength(1);
+    expect(result.turns).toHaveLength(2);
+    expect(result.turns.map((turn) => turn.speakerAgentId)).toEqual(['agent-a', 'agent-b']);
   });
 
   it('fails closed when the judge response is malformed', async () => {
@@ -224,5 +225,62 @@ describe('bounded agent conversation', () => {
       redactionPassed: false,
       endReason: 'invalid_judge_output',
     });
+  });
+
+  it('caps an agreeable verdict when both people never test a concrete difference', async () => {
+    const agreeableCompleter: Completer = {
+      complete: async (request) =>
+        Promise.resolve({
+          text:
+            request.task === 'redaction'
+              ? JSON.stringify({
+                  safe: true,
+                  redacted: request.messages.at(-1)?.content ?? '',
+                  uncertain: false,
+                  flags: [],
+                })
+              : request.task === 'judge'
+                ? JSON.stringify({
+                    score: 92,
+                    reasons: ['They agree.', 'They sound warm.', 'They both like coffee.'],
+                    flags: [],
+                    suggestedFirstActivity: 'Coffee',
+                    oneLineReason: 'Very compatible.',
+                  })
+                : 'That sounds good to me. What else do you enjoy?',
+          provider: 'stub',
+          model: 'stub',
+          tokensIn: 2,
+          tokensOut: 2,
+          latencyMs: 1,
+          costCents: 0,
+          usedFallback: false,
+        }),
+    };
+    const result = await runBoundedConversation(
+      {
+        agentId: 'agent-a',
+        agentName: 'A',
+        facts: [],
+        voice: { tone: [], sentenceStyle: 'short', avoids: [] },
+      },
+      {
+        agentId: 'agent-b',
+        agentName: 'B',
+        facts: [],
+        voice: { tone: [], sentenceStyle: 'short', avoids: [] },
+      },
+      { kind: 'friendship', params: {} },
+      agreeableCompleter,
+      {
+        maxTurns: 2,
+        maxTokenBudget: 100,
+        userId: 'user-12345',
+        runId: 'run-12345',
+        conversationId: 'conversation-12345',
+      },
+    );
+    expect(result.verdict?.score).toBe(49);
+    expect(result.verdict?.flags).toContain('insufficient_tension');
   });
 });

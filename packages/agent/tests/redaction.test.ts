@@ -44,6 +44,11 @@ describe('privacy firewall', () => {
     const result = regexRedact('Find me on the photo app; it is the same username everywhere.');
     expect(result.passed).toBe(false);
     expect(result.uncertain).toBe(true);
+    expect(result.failure).toEqual({
+      category: 'evasive_contact_language',
+      pattern: 'platform_lookup',
+      source: 'regex',
+    });
   });
 
   it('does not flag ordinary compatibility language', () => {
