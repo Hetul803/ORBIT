@@ -16,6 +16,7 @@ import { StyleSheet, View } from 'react-native';
 import * as Sentry from '@sentry/react-native';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { OrbitText, useOrbitTheme } from '@orbit/ui';
+import { scrubTelemetryEvent } from '@orbit/shared';
 
 import { flushOfflineQueue, hydrateOfflineQueue } from '@/offline';
 import { queryClient } from '@/query';
@@ -33,12 +34,16 @@ Sentry.init({
   environment: process.env.NODE_ENV,
   tracesSampleRate: 0.1,
   sendDefaultPii: false,
+  beforeBreadcrumb: () => null,
+  beforeSend: scrubTelemetryEvent,
+  beforeSendTransaction: scrubTelemetryEvent,
 });
 
 function RootLayout(): ReactNode {
   const hydrate = useAuthStore((state) => state.hydrate);
   const hydrated = useAuthStore((state) => state.hydrated);
   const accessToken = useAuthStore((state) => state.accessToken);
+  const resumeOnboarding = useAuthStore((state) => state.resumeOnboarding);
   const reachable = useNetworkStore((state) => state.reachable);
   const queuedWrites = useNetworkStore((state) => state.queuedWrites);
   const segments = useSegments();
@@ -71,8 +76,8 @@ function RootLayout(): ReactNode {
 
   useEffect(() => {
     if (!fontsLoaded || !hydrated || routeAllowed) return;
-    router.replace(accessToken === null ? '/sign-in' : '/today');
-  }, [accessToken, fontsLoaded, hydrated, routeAllowed, router]);
+    router.replace(accessToken === null ? '/sign-in' : resumeOnboarding ? '/agent' : '/today');
+  }, [accessToken, fontsLoaded, hydrated, resumeOnboarding, routeAllowed, router]);
 
   if (!fontsLoaded || !hydrated || !routeAllowed) return null;
   return (

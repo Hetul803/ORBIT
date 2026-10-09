@@ -1,16 +1,16 @@
 import { router } from 'expo-router';
-import { useState, type ReactNode } from 'react';
-import { KeyboardAvoidingView, Platform, StyleSheet, View } from 'react-native';
+import { useEffect, useState, type ReactNode } from 'react';
+import { KeyboardAvoidingView, Linking, Platform, StyleSheet, View } from 'react-native';
 import { Button, Card, OrbitText, Screen, spacing } from '@orbit/ui';
 
-import { api, ApiRequestError, jsonBody } from '@/api';
+import { api, ApiRequestError, configuredApiUrl, jsonBody } from '@/api';
 import { ErrorText, Field, Notice, Wordmark } from '@/components';
 import { useAuthStore } from '@/store';
 
 interface OtpRequestResponse {
   ok: boolean;
   expiresIn: number;
-  developmentCode?: string;
+  resendAfterSeconds: number;
 }
 interface OtpVerifyResponse {
   accessToken: string;
@@ -25,24 +25,50 @@ export default function SignIn(): ReactNode {
   const [displayName, setDisplayName] = useState('');
   const [dateOfBirth, setDateOfBirth] = useState('');
   const [code, setCode] = useState('');
-  const [developmentCode, setDevelopmentCode] = useState<string | null>(null);
+  const [resendAvailableAt, setResendAvailableAt] = useState(0);
+  const [now, setNow] = useState(Date.now());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const resendSeconds = Math.max(0, Math.ceil((resendAvailableAt - now) / 1_000));
+
+  useEffect(() => {
+    if (resendSeconds === 0) return;
+    const timer = setInterval(() => setNow(Date.now()), 1_000);
+    return () => clearInterval(timer);
+  }, [resendSeconds]);
+
+  const authError = (caught: unknown): string => {
+    if (!(caught instanceof ApiRequestError)) {
+      return 'Could not reach ORBIT. Check your connection and try again.';
+    }
+    if (caught.code === 'NETWORK_UNAVAILABLE') {
+      return 'You are offline. Reconnect, then request or verify the code again.';
+    }
+    if (caught.code === 'OTP_INCORRECT') {
+      return 'That code is incorrect. Check all six digits in the newest email and try again.';
+    }
+    if (caught.code === 'OTP_EXPIRED') {
+      return 'That code expired. Request a new code below, then use only the newest email.';
+    }
+    if (caught.code === 'OTP_RESEND_WAIT') {
+      return 'A code was just sent. Wait for the resend timer instead of requesting repeatedly.';
+    }
+    if (caught.code.includes('RATE_LIMITED') || caught.code === 'OTP_LOCKED') {
+      return `${caught.message} Pause for 15 minutes before trying again.`;
+    }
+    return caught.message;
+  };
 
   const requestCode = async (): Promise<void> => {
     setBusy(true);
     setError(null);
     try {
       const result = await api<OtpRequestResponse>('/v1/auth/otp/request', jsonBody({ email }));
-      setDevelopmentCode(result.developmentCode ?? null);
-      if (result.developmentCode !== undefined) setCode(result.developmentCode);
+      setResendAvailableAt(Date.now() + result.resendAfterSeconds * 1_000);
+      setNow(Date.now());
       setStep('code');
     } catch (caught: unknown) {
-      setError(
-        caught instanceof ApiRequestError
-          ? caught.message
-          : 'Could not reach ORBIT. Check your connection and try again.',
-      );
+      setError(authError(caught));
     } finally {
       setBusy(false);
     }
@@ -59,7 +85,7 @@ export default function SignIn(): ReactNode {
       await setTokens(result.accessToken, result.refreshToken);
       router.replace(result.hasAgent ? '/today' : '/agent');
     } catch (caught: unknown) {
-      setError(caught instanceof ApiRequestError ? caught.message : 'Could not verify the code.');
+      setError(authError(caught));
     } finally {
       setBusy(false);
     }
@@ -121,19 +147,23 @@ export default function SignIn(): ReactNode {
                 onChangeText={setDateOfBirth}
                 hint="YYYY-MM-DD · ORBIT is strictly 18+."
               />
-              {developmentCode === null ? null : (
-                <Notice
-                  title="Local development"
-                  detail={`Your code is ${developmentCode}. Production sends this by email.`}
-                  tone="moss"
-                />
-              )}
+              <Notice
+                title="Check your email"
+                detail="Use the newest six-digit code. ORBIT never displays sign-in codes inside the app."
+                tone="moss"
+              />
               <Button
                 label="Continue"
                 onPress={() => void verify()}
                 loading={busy}
                 disabled={code.length !== 6 || displayName.length === 0}
                 testID="verify-code"
+              />
+              <Button
+                label={resendSeconds > 0 ? `Resend in ${String(resendSeconds)}s` : 'Resend code'}
+                onPress={() => void requestCode()}
+                disabled={busy || resendSeconds > 0}
+                kind="secondary"
               />
               <Button label="Use another email" onPress={() => setStep('email')} kind="quiet" />
             </>
@@ -144,6 +174,20 @@ export default function SignIn(): ReactNode {
           No social scraping. No ads. No sale of personal data. Your agent reveals nothing until
           both people explicitly agree.
         </OrbitText>
+        {configuredApiUrl.length === 0 ? null : (
+          <View style={styles.legal}>
+            <Button
+              label="Privacy"
+              onPress={() => void Linking.openURL(`${configuredApiUrl}/privacy`)}
+              kind="quiet"
+            />
+            <Button
+              label="Terms"
+              onPress={() => void Linking.openURL(`${configuredApiUrl}/terms`)}
+              kind="quiet"
+            />
+          </View>
+        )}
       </Screen>
     </KeyboardAvoidingView>
   );
@@ -154,4 +198,5 @@ const styles = StyleSheet.create({
   content: { minHeight: '100%', justifyContent: 'space-between', paddingTop: spacing.xl },
   hero: { gap: spacing.lg, paddingVertical: spacing.xl },
   privacy: { textAlign: 'center' },
+  legal: { flexDirection: 'row', justifyContent: 'center', gap: spacing.sm },
 });

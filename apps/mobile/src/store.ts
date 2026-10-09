@@ -1,4 +1,5 @@
 import * as SecureStore from 'expo-secure-store';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import { create } from 'zustand';
 
@@ -7,6 +8,7 @@ interface AuthState {
   refreshToken: string | null;
   hydrated: boolean;
   onboarded: boolean;
+  resumeOnboarding: boolean;
   setTokens: (accessToken: string, refreshToken: string) => Promise<void>;
   setOnboarded: (value: boolean) => void;
   hydrate: () => Promise<void>;
@@ -15,6 +17,38 @@ interface AuthState {
 
 const accessKey = 'orbit.access-token';
 const refreshKey = 'orbit.refresh-token';
+const onboardingKey = 'orbit.onboarding-progress.v1';
+
+export interface OnboardingProgress {
+  started: boolean;
+  interviewComplete: boolean;
+  sessionId?: string;
+  question: string;
+  progress: number;
+  adaptive: boolean;
+  facts: { kind: string; content: string }[];
+  answer?: string;
+  agentName?: string;
+}
+
+export const loadOnboardingProgress = async (): Promise<OnboardingProgress | null> => {
+  const stored = await AsyncStorage.getItem(onboardingKey);
+  if (stored === null) return null;
+  try {
+    return JSON.parse(stored) as OnboardingProgress;
+  } catch {
+    await AsyncStorage.removeItem(onboardingKey);
+    return null;
+  }
+};
+
+export const saveOnboardingProgress = async (progress: OnboardingProgress): Promise<void> => {
+  await AsyncStorage.setItem(onboardingKey, JSON.stringify(progress));
+};
+
+export const clearOnboardingProgress = async (): Promise<void> => {
+  await AsyncStorage.removeItem(onboardingKey);
+};
 
 const getCredential = async (key: string): Promise<string | null> => {
   if (Platform.OS === 'web') return globalThis.sessionStorage.getItem(key);
@@ -42,6 +76,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   refreshToken: null,
   hydrated: false,
   onboarded: false,
+  resumeOnboarding: false,
   setTokens: async (accessToken, refreshToken) => {
     await Promise.all([
       setCredential(accessKey, accessToken),
@@ -49,17 +84,35 @@ export const useAuthStore = create<AuthState>((set) => ({
     ]);
     set({ accessToken, refreshToken });
   },
-  setOnboarded: (onboarded) => set({ onboarded }),
+  setOnboarded: (onboarded) => set({ onboarded, resumeOnboarding: !onboarded }),
   hydrate: async () => {
-    const [accessToken, refreshToken] = await Promise.all([
+    const [accessToken, refreshToken, savedProgress] = await Promise.all([
       getCredential(accessKey),
       getCredential(refreshKey),
+      loadOnboardingProgress(),
     ]);
-    set({ accessToken, refreshToken, hydrated: true });
+    set({
+      accessToken,
+      refreshToken,
+      hydrated: true,
+      resumeOnboarding: accessToken !== null && savedProgress !== null,
+    });
   },
   signOut: async () => {
-    await Promise.all([deleteCredential(accessKey), deleteCredential(refreshKey)]);
-    set({ accessToken: null, refreshToken: null, onboarded: false });
+    set({ accessToken: null, refreshToken: null, onboarded: false, resumeOnboarding: false });
+    const [{ queryClient }, { clearOfflineData }] = await Promise.all([
+      import('./query'),
+      import('./offline'),
+    ]);
+    await queryClient.cancelQueries();
+    queryClient.clear();
+    await Promise.all([
+      deleteCredential(accessKey),
+      deleteCredential(refreshKey),
+      clearOnboardingProgress(),
+      clearOfflineData(),
+    ]);
+    set({ accessToken: null, refreshToken: null, onboarded: false, resumeOnboarding: false });
   },
 }));
 

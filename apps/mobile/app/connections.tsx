@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Linking } from 'react-native';
 import { Button, Card, OrbitText, Pill, Ring, Screen } from '@orbit/ui';
 
@@ -13,6 +13,10 @@ interface Connection {
   scopes: string[];
   status: string;
   lastSyncedAt: string | null;
+  syncStatus: string;
+  syncProcessed: number;
+  syncTotal: number | null;
+  syncStartedAt: string | null;
 }
 
 interface GmailStatus {
@@ -37,39 +41,17 @@ export default function Connections(): ReactNode {
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const handledCallback = useRef<string | null>(null);
 
-  useEffect(() => {
-    const subscription = Linking.addEventListener('url', (event) => {
-      const url = new URL(event.url);
-      if (url.protocol === 'orbit:' && url.searchParams.get('gmail') === 'connected') {
-        setMessage('Google connected. Syncing your last 90 days now…');
-        void refresh().then(() => void sync());
-      }
-    });
-    return () => subscription.remove();
-  }, []);
-
-  const refresh = async (): Promise<void> => {
+  const refresh = useCallback(async (): Promise<void> => {
     await Promise.all([query.refetch(), gmail.refetch()]);
-  };
-  const connect = async (): Promise<void> => {
+  }, [gmail, query]);
+
+  const sync = useCallback(async (): Promise<void> => {
     setBusy(true);
     setError(null);
-    try {
-      const result = await api<{ authorizationUrl: string }>('/v1/connections/gmail/start', {
-        method: 'POST',
-      });
-      await Linking.openURL(result.authorizationUrl);
-      setMessage('Finish authorization in Google, then return and tap Refresh status.');
-    } catch (caught: unknown) {
-      setError(caught instanceof Error ? caught.message : 'Could not start Google authorization.');
-    } finally {
-      setBusy(false);
-    }
-  };
-  const sync = async (): Promise<void> => {
-    setBusy(true);
-    setError(null);
+    setMessage('Starting Google sync. Reading authorization status…');
+    const progressTimer = setInterval(() => void gmail.refetch(), 1_500);
     try {
       const result = await api<{
         imported: number;
@@ -87,6 +69,58 @@ export default function Connections(): ReactNode {
       ]);
     } catch (caught: unknown) {
       setError(caught instanceof Error ? caught.message : 'Could not sync Gmail.');
+    } finally {
+      clearInterval(progressTimer);
+      setBusy(false);
+    }
+  }, [client, gmail, refresh]);
+
+  const handleGoogleCallback = useCallback(
+    (eventUrl: string): void => {
+      if (handledCallback.current === eventUrl) return;
+      handledCallback.current = eventUrl;
+      let url: URL;
+      try {
+        url = new URL(eventUrl);
+      } catch {
+        return;
+      }
+      if (url.protocol !== 'orbit:') return;
+      const outcome = url.searchParams.get('gmail');
+      if (outcome === 'connected') {
+        setMessage('Google connected. Starting the first source-backed sync…');
+        void refresh().then(() => void sync());
+      } else if (outcome === 'denied') {
+        setMessage('Google access was denied. ORBIT still works; connect later if you want Catch.');
+      } else if (outcome === 'incomplete') {
+        setError('Google authorization was cancelled before it finished. Nothing was connected.');
+      } else if (outcome === 'failed') {
+        setError('Google could not finish authorization. Check your network and try again.');
+      }
+    },
+    [refresh, sync],
+  );
+
+  useEffect(() => {
+    void Linking.getInitialURL().then((url) => {
+      if (url !== null) handleGoogleCallback(url);
+    });
+    const subscription = Linking.addEventListener('url', (event) =>
+      handleGoogleCallback(event.url),
+    );
+    return () => subscription.remove();
+  }, [handleGoogleCallback]);
+  const connect = async (): Promise<void> => {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await api<{ authorizationUrl: string }>('/v1/connections/gmail/start', {
+        method: 'POST',
+      });
+      await Linking.openURL(result.authorizationUrl);
+      setMessage('Finish authorization in Google, then return and tap Refresh status.');
+    } catch (caught: unknown) {
+      setError(caught instanceof Error ? caught.message : 'Could not start Google authorization.');
     } finally {
       setBusy(false);
     }
@@ -148,6 +182,41 @@ export default function Connections(): ReactNode {
                   ? 'Never'
                   : new Date(gmail.data.connection.lastSyncedAt).toLocaleString()}
               </OrbitText>
+              {gmail.data.connection?.syncStatus === 'error' ? (
+                <Notice
+                  title="Last sync stopped"
+                  detail="Nothing new was marked current. Check your network, then tap Sync Gmail + Calendar to retry. If Google access expired, reconnect it first."
+                  tone="ember"
+                />
+              ) : gmail.data.connection === null ||
+                gmail.data.connection.syncStatus === 'idle' ? null : (
+                <Card tone="blue">
+                  <Pill tone="blue">FIRST SYNC IN PROGRESS</Pill>
+                  <Ring
+                    value={
+                      gmail.data.connection.syncTotal === null ||
+                      gmail.data.connection.syncTotal === 0
+                        ? 0.08
+                        : gmail.data.connection.syncProcessed / gmail.data.connection.syncTotal
+                    }
+                    tone="yours"
+                    size={46}
+                    seed="google-sync"
+                  />
+                  <OrbitText variant="label">
+                    {gmail.data.connection.syncStatus === 'authorizing'
+                      ? 'Checking encrypted Google access…'
+                      : gmail.data.connection.syncStatus === 'reading_mail'
+                        ? `Reading message metadata ${String(gmail.data.connection.syncProcessed)}/${String(gmail.data.connection.syncTotal ?? '?')}…`
+                        : gmail.data.connection.syncStatus === 'reading_calendar'
+                          ? 'Reading the next 14 days of Calendar…'
+                          : 'Building source-backed Catch items…'}
+                  </OrbitText>
+                  <OrbitText variant="caption">
+                    A first sync can take several minutes for an active inbox. Keep ORBIT open.
+                  </OrbitText>
+                </Card>
+              )}
               <Button label="Sync Gmail + Calendar" onPress={() => void sync()} loading={busy} />
               {confirmDisconnect ? (
                 <>

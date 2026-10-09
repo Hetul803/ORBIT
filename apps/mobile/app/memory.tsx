@@ -19,6 +19,7 @@ interface MemoryFact {
 const Fact = ({ fact }: { fact: MemoryFact }): ReactNode => {
   const client = useQueryClient();
   const [editing, setEditing] = useState(false);
+  const [confirmForget, setConfirmForget] = useState(false);
   const [content, setContent] = useState(fact.content);
   const update = useMutation({
     mutationFn: () => api(`/v1/agent/memory/${fact.id}`, patchBody({ content })),
@@ -57,7 +58,22 @@ const Fact = ({ fact }: { fact: MemoryFact }): ReactNode => {
       ) : (
         <>
           <Button label="Correct" onPress={() => setEditing(true)} kind="secondary" />
-          <Button label="Forget" onPress={() => remove.mutate()} kind="quiet" />
+          {confirmForget ? (
+            <>
+              <OrbitText variant="label">
+                Remove this durable fact from your agent’s memory?
+              </OrbitText>
+              <Button
+                label="Yes, forget this fact"
+                onPress={() => remove.mutate()}
+                loading={remove.isPending}
+                kind="danger"
+              />
+              <Button label="Keep this fact" onPress={() => setConfirmForget(false)} kind="quiet" />
+            </>
+          ) : (
+            <Button label="Forget" onPress={() => setConfirmForget(true)} kind="quiet" />
+          )}
         </>
       )}
     </Card>

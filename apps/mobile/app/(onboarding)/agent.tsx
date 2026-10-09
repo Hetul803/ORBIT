@@ -1,11 +1,16 @@
 import { router } from 'expo-router';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { View } from 'react-native';
 import { Button, Card, OrbitText, Pill, Ring, Screen, spacing } from '@orbit/ui';
 
 import { api, ApiRequestError, jsonBody, patchBody } from '@/api';
 import { AppHeader, ErrorText, Field, Notice } from '@/components';
-import { useAuthStore } from '@/store';
+import {
+  clearOnboardingProgress,
+  loadOnboardingProgress,
+  saveOnboardingProgress,
+  useAuthStore,
+} from '@/store';
 
 interface InterviewResponse {
   sessionId: string;
@@ -14,6 +19,7 @@ interface InterviewResponse {
   complete: boolean;
   adaptive: boolean;
   learnedFacts: { kind: string; content: string }[];
+  modelNotice?: string | null;
 }
 
 export default function AgentOnboarding(): ReactNode {
@@ -31,6 +37,57 @@ export default function AgentOnboarding(): ReactNode {
   const [facts, setFacts] = useState<{ kind: string; content: string }[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [modelNotice, setModelNotice] = useState<string | null>(null);
+  const [restored, setRestored] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    void loadOnboardingProgress()
+      .then((saved) => {
+        if (!active || saved === null) return;
+        setStarted(saved.started);
+        setInterviewComplete(saved.interviewComplete);
+        setSessionId(saved.sessionId);
+        setQuestion(saved.question);
+        setProgress(saved.progress);
+        setAdaptive(saved.adaptive);
+        setFacts(saved.facts);
+        setAnswer(saved.answer ?? '');
+        setAgentName(saved.agentName ?? '');
+      })
+      .finally(() => {
+        if (active) setRestored(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!restored) return;
+    void saveOnboardingProgress({
+      started,
+      interviewComplete,
+      ...(sessionId === undefined ? {} : { sessionId }),
+      question,
+      progress,
+      adaptive,
+      facts,
+      answer,
+      agentName,
+    });
+  }, [
+    adaptive,
+    agentName,
+    answer,
+    facts,
+    interviewComplete,
+    progress,
+    question,
+    restored,
+    sessionId,
+    started,
+  ]);
 
   const startInterview = async (): Promise<void> => {
     setBusy(true);
@@ -58,11 +115,21 @@ export default function AgentOnboarding(): ReactNode {
       setQuestion(result.question);
       setProgress(result.progress);
       setAdaptive(result.adaptive);
+      setModelNotice(result.modelNotice ?? null);
       setFacts((current) => [...current, ...result.learnedFacts]);
       setAnswer('');
       if (result.complete) setInterviewComplete(true);
     } catch (caught: unknown) {
-      setError(caught instanceof Error ? caught.message : 'Your answer could not be saved.');
+      if (caught instanceof ApiRequestError && caught.code === 'INTERVIEW_NOT_FOUND') {
+        await clearOnboardingProgress();
+        setStarted(false);
+        setSessionId(undefined);
+        setProgress(0);
+        setFacts([]);
+        setError('That saved interview expired. Start again; no partial profile was fabricated.');
+      } else {
+        setError(caught instanceof Error ? caught.message : 'Your answer could not be saved.');
+      }
     } finally {
       setBusy(false);
     }
@@ -73,6 +140,7 @@ export default function AgentOnboarding(): ReactNode {
     setError(null);
     try {
       await api('/v1/agent', patchBody({ name: agentName.trim() }));
+      await clearOnboardingProgress();
       setOnboarded(true);
       router.replace('/today');
     } catch (caught: unknown) {
@@ -159,7 +227,7 @@ export default function AgentOnboarding(): ReactNode {
             <OrbitText variant="caption">
               {adaptive
                 ? 'This follow-up adapted to your prior answers.'
-                : 'Using the bounded local interview sequence until a model provider is configured.'}
+                : 'Using the fixed interview sequence. Your answers—not a sample profile—are saved.'}
             </OrbitText>
           </Card>
           {facts.length === 0 ? null : (
@@ -183,6 +251,9 @@ export default function AgentOnboarding(): ReactNode {
         tone="blue"
       />
       {error === null ? null : <ErrorText message={error} />}
+      {modelNotice === null ? null : (
+        <Notice title="Answer saved" detail={modelNotice} tone="blue" />
+      )}
     </Screen>
   );
 }

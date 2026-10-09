@@ -1,10 +1,12 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
-import { useNetworkStore } from './store';
+import { useAuthStore, useNetworkStore } from './store';
+import { offlineScope } from './offline-scope';
 
-const cachePrefix = 'orbit.offline.cache.v1:';
-const queueKey = 'orbit.offline.queue.v1';
+const cachePrefix = 'orbit.offline.cache.v2:';
+const queuePrefix = 'orbit.offline.queue.v2:';
+const currentScope = (): string | null => offlineScope(useAuthStore.getState().accessToken);
 const maxQueuedWrites = 80;
 
 interface CachedRecord {
@@ -31,13 +33,33 @@ const storage = {
   },
 };
 
-const cacheKey = (path: string): string => `${cachePrefix}${encodeURIComponent(path)}`;
+const cacheKey = (path: string, scope: string): string =>
+  `${cachePrefix}${scope}:${encodeURIComponent(path)}`;
+
+export const clearOfflineData = async (): Promise<void> => {
+  if (Platform.OS === 'web') {
+    for (const key of Object.keys(globalThis.localStorage)) {
+      if (key.startsWith('orbit.offline.')) globalThis.localStorage.removeItem(key);
+    }
+  } else {
+    const keys = (await AsyncStorage.getAllKeys()).filter((key) =>
+      key.startsWith('orbit.offline.'),
+    );
+    if (keys.length > 0) await AsyncStorage.multiRemove(keys);
+  }
+  useNetworkStore.getState().setQueuedWrites(0);
+};
 
 export { isOfflineQueueable, isOfflineReadable } from './offline-policy';
 
-export const cacheResponse = async (path: string, value: unknown): Promise<void> => {
+export const cacheResponse = async (
+  path: string,
+  value: unknown,
+  scope = currentScope(),
+): Promise<void> => {
+  if (scope === null || scope !== currentScope()) return;
   await storage.setItem(
-    cacheKey(path),
+    cacheKey(path, scope),
     JSON.stringify({ cachedAt: new Date().toISOString(), value }),
   );
 };
@@ -45,7 +67,9 @@ export const cacheResponse = async (path: string, value: unknown): Promise<void>
 export const cachedResponse = async (
   path: string,
 ): Promise<{ value: unknown; cachedAt: string } | null> => {
-  const raw = await storage.getItem(cacheKey(path));
+  const scope = currentScope();
+  if (scope === null) return null;
+  const raw = await storage.getItem(cacheKey(path, scope));
   if (raw === null) return null;
   try {
     const parsed = JSON.parse(raw) as CachedRecord;
@@ -56,8 +80,9 @@ export const cachedResponse = async (
   }
 };
 
-const readQueue = async (): Promise<QueuedWrite[]> => {
-  const raw = await storage.getItem(queueKey);
+const readQueue = async (scope = currentScope()): Promise<QueuedWrite[]> => {
+  if (scope === null) return [];
+  const raw = await storage.getItem(`${queuePrefix}${scope}`);
   if (raw === null) return [];
   try {
     const queue = JSON.parse(raw) as unknown;
@@ -67,8 +92,9 @@ const readQueue = async (): Promise<QueuedWrite[]> => {
   }
 };
 
-const writeQueue = async (queue: readonly QueuedWrite[]): Promise<void> => {
-  await storage.setItem(queueKey, JSON.stringify(queue));
+const writeQueue = async (queue: readonly QueuedWrite[], scope = currentScope()): Promise<void> => {
+  if (scope === null || scope !== currentScope()) return;
+  await storage.setItem(`${queuePrefix}${scope}`, JSON.stringify(queue));
   useNetworkStore.getState().setQueuedWrites(queue.length);
 };
 
@@ -79,6 +105,8 @@ export const hydrateOfflineQueue = async (): Promise<void> => {
 export const enqueueWrite = async (path: string, init: RequestInit): Promise<void> => {
   const queue = await readQueue();
   const headers = new Headers(init.headers);
+  headers.delete('Authorization');
+  headers.delete('Cookie');
   const method = init.method ?? 'POST';
   const body = typeof init.body === 'string' ? init.body : undefined;
   queue.push({
@@ -97,10 +125,12 @@ export const enqueueWrite = async (path: string, init: RequestInit): Promise<voi
 export const flushOfflineQueue = async (
   send: (path: string, init: RequestInit) => Promise<Response>,
 ): Promise<{ replayed: number; remaining: number }> => {
-  const queue = await readQueue();
+  const scope = currentScope();
+  const queue = await readQueue(scope);
   const remaining: QueuedWrite[] = [];
   let replayed = 0;
   for (let index = 0; index < queue.length; index += 1) {
+    if (scope !== currentScope()) return { replayed, remaining: 0 };
     const write = queue[index];
     if (write === undefined) continue;
     try {
@@ -113,6 +143,6 @@ export const flushOfflineQueue = async (
       break;
     }
   }
-  await writeQueue(remaining);
+  await writeQueue(remaining, scope);
   return { replayed, remaining: remaining.length };
 };

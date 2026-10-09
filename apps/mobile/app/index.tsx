@@ -5,5 +5,8 @@ import { useAuthStore } from '@/store';
 
 export default function Index(): ReactNode {
   const accessToken = useAuthStore((state) => state.accessToken);
-  return <Redirect href={accessToken === null ? '/sign-in' : '/today'} />;
+  const resumeOnboarding = useAuthStore((state) => state.resumeOnboarding);
+  return (
+    <Redirect href={accessToken === null ? '/sign-in' : resumeOnboarding ? '/agent' : '/today'} />
+  );
 }

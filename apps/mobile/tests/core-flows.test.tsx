@@ -7,6 +7,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const apiMock = vi.hoisted(() => vi.fn());
 const setTokensMock = vi.hoisted(() => vi.fn(async () => undefined));
 const setOnboardedMock = vi.hoisted(() => vi.fn());
+const loadOnboardingProgressMock = vi.hoisted(() => vi.fn(async (): Promise<unknown> => null));
+const saveOnboardingProgressMock = vi.hoisted(() => vi.fn(async () => undefined));
+const clearOnboardingProgressMock = vi.hoisted(() => vi.fn(async () => undefined));
 
 vi.mock('@/api', () => {
   class ApiRequestError extends Error {
@@ -21,12 +24,16 @@ vi.mock('@/api', () => {
   return {
     api: apiMock,
     ApiRequestError,
+    configuredApiUrl: 'http://localhost:4100',
     jsonBody: (value: unknown) => ({ method: 'POST', body: JSON.stringify(value) }),
     patchBody: (value: unknown) => ({ method: 'PATCH', body: JSON.stringify(value) }),
   };
 });
 
 vi.mock('@/store', () => ({
+  loadOnboardingProgress: loadOnboardingProgressMock,
+  saveOnboardingProgress: saveOnboardingProgressMock,
+  clearOnboardingProgress: clearOnboardingProgressMock,
   useAuthStore: (
     selector: (state: {
       setTokens: typeof setTokensMock;
@@ -59,19 +66,29 @@ describe('mobile core interactions', () => {
     apiMock.mockReset();
     setTokensMock.mockClear();
     setOnboardedMock.mockClear();
+    loadOnboardingProgressMock.mockClear();
+    loadOnboardingProgressMock.mockResolvedValue(null);
+    saveOnboardingProgressMock.mockClear();
+    clearOnboardingProgressMock.mockClear();
     vi.mocked(router.replace).mockClear();
   });
 
   it('requests and verifies a real sign-in code with no prefilled identity', async () => {
     apiMock
-      .mockResolvedValueOnce({ ok: true, expiresIn: 600, developmentCode: '321654' })
-      .mockResolvedValueOnce({ accessToken: 'access-real', refreshToken: 'refresh-real' });
+      .mockResolvedValueOnce({ ok: true, expiresIn: 600, resendAfterSeconds: 30 })
+      .mockResolvedValueOnce({
+        accessToken: 'access-real',
+        refreshToken: 'refresh-real',
+        hasAgent: false,
+      });
     render(<SignIn />);
     expect(screen.getByLabelText('Email')).toHaveValue('');
     change('Email', 'person@example.com');
     fireEvent.click(screen.getByRole('button', { name: 'Send six-digit code' }));
     expect(await screen.findByText('Verify it’s you')).toBeInTheDocument();
-    expect(screen.getByLabelText('Code')).toHaveValue('321654');
+    expect(screen.getByLabelText('Code')).toHaveValue('');
+    expect(screen.getByText(/never displays sign-in codes inside the app/iu)).toBeInTheDocument();
+    change('Code', '321654');
     change('What should we call you?', 'Avery');
     change('Date of birth', '1996-02-03');
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
@@ -106,6 +123,35 @@ describe('mobile core interactions', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Name and enter ORBIT' }));
     await waitFor(() => expect(setOnboardedMock).toHaveBeenCalledWith(true));
     expect(router.replace).toHaveBeenCalledWith('/today');
+  });
+
+  it('restores the fourth interview question and unsent draft after reopening', async () => {
+    loadOnboardingProgressMock.mockResolvedValue({
+      started: true,
+      interviewComplete: false,
+      sessionId: 'saved-interview',
+      question: 'What would make a first meeting uncomfortable?',
+      progress: 0.6,
+      adaptive: true,
+      facts: [{ kind: 'constraint', content: 'Quiet first meetings.' }],
+      answer: 'A crowded bar would',
+      agentName: '',
+    });
+    render(<AgentOnboarding />);
+    expect(
+      await screen.findByText('What would make a first meeting uncomfortable?'),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText('Your answer')).toHaveValue('A crowded bar would');
+    expect(apiMock).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(saveOnboardingProgressMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: 'saved-interview',
+          progress: 0.6,
+          answer: 'A crowded bar would',
+        }),
+      ),
+    );
   });
 
   it('shows the redacted transcript and submits only chosen reveal fields', async () => {
@@ -158,6 +204,15 @@ describe('mobile core interactions', () => {
         }),
       ),
     );
+  });
+
+  it('never fabricates an introduction when the query fails', async () => {
+    apiMock.mockRejectedValue(new Error('API unavailable'));
+    renderWithQuery(<IntroductionScreen />);
+    expect(await screen.findByRole('button', { name: 'Try again' })).toBeInTheDocument();
+    expect(screen.queryByText('Strong fit with clear boundaries.')).not.toBeInTheDocument();
+    expect(screen.queryByText('I prefer a calm first meeting.')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reveal if they reveal' })).not.toBeInTheDocument();
   });
 
   it('pauses and deletes a watcher only after explicit confirmation', async () => {

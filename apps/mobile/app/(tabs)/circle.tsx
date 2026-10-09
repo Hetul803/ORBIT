@@ -33,11 +33,25 @@ interface RawIntroduction {
   expiresAt: string;
 }
 
+interface MatchingStatus {
+  activeIntentCount: number;
+  availablePeople: number;
+  runsOvernight: boolean;
+  lastRunAt: string | null;
+  lastRunStatus: string | null;
+  costCapPaused: boolean;
+  providerFailed: boolean;
+}
+
 export default function Circle(): ReactNode {
   const { colors } = useOrbitTheme();
   const query = useQuery({
     queryKey: ['introductions'],
     queryFn: () => api<RawIntroduction[]>('/v1/introductions'),
+  });
+  const matching = useQuery({
+    queryKey: ['matching-status'],
+    queryFn: () => api<MatchingStatus>('/v1/matching/status'),
   });
   const introductions = query.isError ? [] : (query.data ?? []);
   return (
@@ -51,6 +65,22 @@ export default function Circle(): ReactNode {
         detail="ORBIT gives you a few high-conviction introductions, not an infinite deck of people."
         tone="blue"
       />
+      {matching.data?.costCapPaused === true ? (
+        <Notice
+          title="Matching paused at the cost limit"
+          detail="No paid model call was made beyond the configured daily limit. Matching will resume after the UTC budget resets."
+          tone="ember"
+        />
+      ) : null}
+      {matching.isError ? (
+        <QueryError message={matching.error.message} onRetry={() => void matching.refetch()} />
+      ) : matching.data?.providerFailed === true ? (
+        <Notice
+          title="The last matching attempt stopped"
+          detail="ORBIT could not complete the agent check. No introduction was invented. Matching will try again in the next overnight run."
+          tone="ember"
+        />
+      ) : null}
       <View style={styles.actions}>
         <Button label="Intents" kind="secondary" onPress={() => router.push('/intents')} />
         <Button label="Exchange" kind="secondary" onPress={() => router.push('/exchange')} />
@@ -70,8 +100,14 @@ export default function Circle(): ReactNode {
             <QueryError message={query.error.message} onRetry={() => void query.refetch()} />
           ) : (
             <EmptyState
-              title="Your agent is looking carefully."
-              detail="Good matching gets better with honest memory and clear active intents."
+              title="No introduction yet."
+              detail={
+                matching.data?.activeIntentCount === 0
+                  ? 'Turn on at least one intent. Matching runs overnight and never invents people.'
+                  : matching.data?.availablePeople === 0
+                    ? 'Matching needs another active adult with a compatible intent. It will stay empty until real people are available.'
+                    : 'Your active intents will be checked in the next overnight run. A match appears only after both agents test a real concern and the privacy gate passes.'
+              }
               action={
                 <Button
                   label="Manage intents"

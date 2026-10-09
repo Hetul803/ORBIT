@@ -7,7 +7,7 @@ import { Linking, Pressable, StyleSheet, View } from 'react-native';
 import { Button, Card, OrbitText, Pill, Ring, Screen, Skeleton, spacing } from '@orbit/ui';
 
 import { api, jsonBody } from '@/api';
-import { AppHeader, EmptyState, ErrorText, QueryError } from '@/components';
+import { AppHeader, EmptyState, ErrorText, Notice, QueryError } from '@/components';
 import type { LifeItem, SourceCitation } from '@/types';
 
 const sourceLabel = (source: SourceCitation): string =>
@@ -16,22 +16,11 @@ const sourceLabel = (source: SourceCitation): string =>
 const formatWhen = (value: string | null): string =>
   value === null ? 'Date unavailable' : new Date(value).toLocaleString();
 
-const CopyDraft = ({
-  text,
-  onDone,
-}: {
-  text: string;
-  onDone: (message: string) => void;
-}): ReactNode => (
+const CopyDraft = ({ text, onCopy }: { text: string; onCopy: () => Promise<void> }): ReactNode => (
   <Button
     label="Copy draft"
     kind="secondary"
-    onPress={() => {
-      void Clipboard.setStringAsync(text).then(() => {
-        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        onDone('Draft copied. Review it before sending.');
-      });
-    }}
+    onPress={() => void Clipboard.setStringAsync(text).then(onCopy)}
   />
 );
 
@@ -39,12 +28,12 @@ const CatchCard = ({
   item,
   onDismiss,
   onSnooze,
-  onNotice,
+  onCopy,
 }: {
   item: LifeItem;
   onDismiss: (id: string) => Promise<void>;
   onSnooze: (id: string) => Promise<void>;
-  onNotice: (message: string) => void;
+  onCopy: (item: LifeItem) => Promise<void>;
 }): ReactNode => {
   const primarySource = item.evidence[0];
   return (
@@ -69,7 +58,12 @@ const CatchCard = ({
         <View style={styles.draft}>
           <OrbitText variant="label">DRAFT — NOT SENT</OrbitText>
           <OrbitText>{item.draft}</OrbitText>
-          <CopyDraft text={item.draft} onDone={onNotice} />
+          <CopyDraft text={item.draft} onCopy={() => onCopy(item)} />
+          {item.copiedAt === null ? null : (
+            <OrbitText variant="caption">
+              Last copied {new Date(item.copiedAt).toLocaleString()}
+            </OrbitText>
+          )}
         </View>
       )}
       <View style={styles.sources}>
@@ -111,6 +105,14 @@ export default function Catch(): ReactNode {
     queryKey: ['life', 'catch'],
     queryFn: () => api<LifeItem[]>('/v1/life/catch'),
   });
+  const googleStatus = useQuery({
+    queryKey: ['gmail-status'],
+    queryFn: () =>
+      api<{
+        reconnectRequired: boolean;
+        connection: { lastSyncedAt: string | null } | null;
+      }>('/v1/connections/gmail/status'),
+  });
   const refresh = async (): Promise<void> => {
     await Promise.all([
       query.refetch(),
@@ -146,12 +148,38 @@ export default function Catch(): ReactNode {
       setBusyId(null);
     }
   };
+  const copy = async (item: LifeItem): Promise<void> => {
+    setBusyId(item.id);
+    setError(null);
+    try {
+      await api(`/v1/life/catch/${item.id}/copied`, { method: 'POST' });
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setNotice('Draft copied. Review it before sending; ORBIT never sends it for you.');
+      await query.refetch();
+    } catch (caught: unknown) {
+      setError(caught instanceof Error ? caught.message : 'The copy receipt could not be saved.');
+    } finally {
+      setBusyId(null);
+    }
+  };
   return (
     <Screen>
       <AppHeader
         title="Catch"
         subtitle="Only things with a tap-back source. Nothing here sends, changes, or hides your original data."
       />
+      {googleStatus.data?.reconnectRequired === true ? (
+        <Notice
+          title="Reconnect Google"
+          detail={`These items are not current. Google testing access expired${
+            googleStatus.data.connection?.lastSyncedAt === null ||
+            googleStatus.data.connection?.lastSyncedAt === undefined
+              ? ''
+              : ` after the ${new Date(googleStatus.data.connection.lastSyncedAt).toLocaleString()} sync`
+          }. Reconnect before relying on Catch.`}
+          tone="ember"
+        />
+      ) : null}
       {query.isPending ? (
         <View style={styles.loading}>
           <Skeleton height={240} />
@@ -169,7 +197,7 @@ export default function Catch(): ReactNode {
         <View style={styles.list}>
           {query.data.map((item) => (
             <View key={item.id} style={busyId === item.id ? styles.busy : undefined}>
-              <CatchCard item={item} onDismiss={dismiss} onSnooze={snooze} onNotice={setNotice} />
+              <CatchCard item={item} onDismiss={dismiss} onSnooze={snooze} onCopy={copy} />
             </View>
           ))}
         </View>

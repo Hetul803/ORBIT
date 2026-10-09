@@ -3,9 +3,10 @@ import { File, Paths } from 'expo-file-system';
 import { router } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import { useEffect, useState, type ReactNode } from 'react';
+import { Linking } from 'react-native';
 import { Button, Card, OrbitText, Pill, Screen } from '@orbit/ui';
 
-import { api, download } from '@/api';
+import { api, configuredApiUrl, download } from '@/api';
 import { AppHeader, ErrorText, Field, Notice, QueryError, RowLink } from '@/components';
 import { defaultPushPreferences, registerPushDevice } from '@/notifications';
 
@@ -244,6 +245,26 @@ export default function Settings(): ReactNode {
           signed ZIP.
         </OrbitText>
       </Card>
+      {configuredApiUrl.length === 0 ? null : (
+        <Card>
+          <OrbitText variant="title">Legal and support</OrbitText>
+          <Button
+            label="Privacy policy"
+            onPress={() => void Linking.openURL(`${configuredApiUrl}/privacy`)}
+            kind="secondary"
+          />
+          <Button
+            label="Terms of service"
+            onPress={() => void Linking.openURL(`${configuredApiUrl}/terms`)}
+            kind="secondary"
+          />
+          <Button
+            label="Support"
+            onPress={() => void Linking.openURL(`${configuredApiUrl}/support`)}
+            kind="secondary"
+          />
+        </Card>
+      )}
       <Card tone="ember">
         <Pill tone="ember">DANGER ZONE</Pill>
         {deletion.isError ? (

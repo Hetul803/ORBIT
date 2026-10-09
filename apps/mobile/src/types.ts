@@ -40,6 +40,7 @@ export interface LifeItem {
   dueAt: string | null;
   snoozedUntil: string | null;
   draft: string | null;
+  copiedAt: string | null;
   createdAt: string;
 }
 

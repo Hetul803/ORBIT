@@ -15,16 +15,8 @@ export default function Verification(): ReactNode {
   const perform = async (work: () => Promise<unknown>, success: string): Promise<void> => {
     setError(null);
     try {
-      const result = (await work()) as { developmentCode?: string };
-      setMessage(
-        result.developmentCode === undefined
-          ? success
-          : `${success} Local code: ${result.developmentCode}`,
-      );
-      if (result.developmentCode !== undefined) {
-        if (success.includes('campus')) setEduCode(result.developmentCode);
-        else setPhoneCode(result.developmentCode);
-      }
+      await work();
+      setMessage(success);
     } catch (caught: unknown) {
       setError(caught instanceof Error ? caught.message : 'Verification failed.');
     }

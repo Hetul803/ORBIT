@@ -3,6 +3,7 @@ import * as Device from 'expo-device';
 import { Platform } from 'react-native';
 
 import { resolveApiUrl } from './api-url';
+import { offlineScope } from './offline-scope';
 import {
   cacheResponse,
   cachedResponse,
@@ -68,6 +69,28 @@ const decode = async <T>(response: Response): Promise<T> => {
   return value as T;
 };
 
+const fetchBounded = async (
+  url: string,
+  init: RequestInit,
+  timeoutMs = 30_000,
+): Promise<Response> => {
+  const controller = new AbortController();
+  const abort = (): void => controller.abort();
+  if (init.signal?.aborted) abort();
+  init.signal?.addEventListener('abort', abort, { once: true });
+  const timer = setTimeout(abort, timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (error: unknown) {
+    if (controller.signal.aborted)
+      throw new TypeError('ORBIT request timed out or was cancelled.', { cause: error });
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    init.signal?.removeEventListener('abort', abort);
+  }
+};
+
 const fetchWithAuth = async (path: string, init: RequestInit): Promise<Response> => {
   const state = useAuthStore.getState();
   const headers = new Headers(init.headers);
@@ -78,9 +101,10 @@ const fetchWithAuth = async (path: string, init: RequestInit): Promise<Response>
   }
   if (state.accessToken !== null) headers.set('Authorization', `Bearer ${state.accessToken}`);
   const baseUrl = requireApiUrl();
-  let response = await fetch(`${baseUrl}${path}`, { ...init, headers });
+  const timeoutMs = path === '/v1/connections/gmail/sync' ? 20 * 60_000 : 30_000;
+  let response = await fetchBounded(`${baseUrl}${path}`, { ...init, headers }, timeoutMs);
   if (response.status !== 401 || state.refreshToken === null) return response;
-  const refreshed = await fetch(`${baseUrl}/v1/auth/refresh`, {
+  const refreshed = await fetchBounded(`${baseUrl}/v1/auth/refresh`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ refreshToken: state.refreshToken }),
@@ -92,25 +116,29 @@ const fetchWithAuth = async (path: string, init: RequestInit): Promise<Response>
   const tokens = await decode<{ accessToken: string; refreshToken: string }>(refreshed);
   await state.setTokens(tokens.accessToken, tokens.refreshToken);
   headers.set('Authorization', `Bearer ${tokens.accessToken}`);
-  response = await fetch(`${baseUrl}${path}`, { ...init, headers });
+  response = await fetchBounded(`${baseUrl}${path}`, { ...init, headers }, timeoutMs);
   return response;
 };
 
 setApiTransport(fetchWithAuth);
 
 export const api = async <T>(path: string, init: RequestInit = {}): Promise<T> => {
+  const scope = offlineScope(useAuthStore.getState().accessToken);
   const method = (init.method ?? 'GET').toUpperCase();
   try {
     const response = await fetchWithAuth(path, init);
     const value = await decode<T>(response);
     useNetworkStore.getState().markReachable();
-    if (isOfflineReadable(path, method)) void cacheResponse(path, value);
+    if (isOfflineReadable(path, method)) void cacheResponse(path, value, scope);
     void flushOfflineQueue(fetchWithAuth).catch(() => undefined);
     return value;
   } catch (error: unknown) {
     const offline =
       error instanceof TypeError || (error instanceof ApiRequestError && error.status === 0);
     if (!offline) throw error;
+    if (scope !== offlineScope(useAuthStore.getState().accessToken)) {
+      throw new ApiRequestError('Your session changed. Sign in again.', 401, 'SESSION_CHANGED');
+    }
     useNetworkStore.getState().markOffline();
     if (isOfflineReadable(path, method)) {
       const cached = await cachedResponse(path);
