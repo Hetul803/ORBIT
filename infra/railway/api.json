@@ -5,6 +5,7 @@
     "dockerfilePath": "infra/Dockerfile.api",
     "watchPatterns": [
       "apps/api/**",
+      "scripts/**",
       "packages/**",
       "infra/Dockerfile.api",
       "package.json",

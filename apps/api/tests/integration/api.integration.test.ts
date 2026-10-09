@@ -13,6 +13,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from '../../src/app.js';
 import { loadConfig } from '../../src/config.js';
 import { PrismaCostLedger } from '../../src/ledger.js';
+import { verifyExportArchive } from '../../src/export-verification.js';
 
 const enabled = process.env.DATABASE_URL?.includes('orbit_test') === true;
 
@@ -21,6 +22,9 @@ const config = loadConfig({
   NODE_ENV: 'test',
   OTP_DELIVERY_MODE: 'log',
   ALLOW_DEVELOPMENT_OTP_DISPLAY: 'true',
+  OTP_RESEND_COOLDOWN_SECONDS: '30',
+  ACCOUNT_CREATION_PER_IP_PER_DAY: '1000',
+  DEPLOYMENT_ACCOUNT_CAP: '1000',
   JWT_ACCESS_SECRET: 'integration-access-secret-at-least-32-characters',
   JWT_REFRESH_SECRET: 'integration-refresh-secret-at-least-32-characters',
   FIELD_ENCRYPTION_KEY: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
@@ -89,6 +93,15 @@ describe.runIf(enabled)('ORBIT API integration', () => {
     return verified.json<{ accessToken: string; refreshToken: string }>();
   };
 
+  it('serves public legal and support pages without authentication', async () => {
+    for (const url of ['/privacy', '/terms', '/support']) {
+      const response = await app.inject({ method: 'GET', url });
+      expect(response.statusCode).toBe(200);
+      expect(response.headers['content-type']).toContain('text/html');
+      expect(response.body).toContain('ORBIT');
+    }
+  });
+
   it('allows browser preflights for every mutation method used by the app', async () => {
     for (const method of ['PUT', 'PATCH', 'DELETE']) {
       const response = await app.inject({
@@ -106,7 +119,7 @@ describe.runIf(enabled)('ORBIT API integration', () => {
   });
 
   it('hard-blocks a user below 18 and records the age gate attempt', async () => {
-    const email = 'underage-test@orbit.local';
+    const email = `underage-${testRunId}@orbit.local`;
     const requested = await app.inject({
       method: 'POST',
       url: '/v1/auth/otp/request',
@@ -126,13 +139,200 @@ describe.runIf(enabled)('ORBIT API integration', () => {
     expect(response.statusCode).toBe(403);
     expect(response.json<{ error: { code: string } }>().error.code).toBe('AGE_RESTRICTED');
     expect(await db.ageGateAttempt.count({ where: { allowed: false } })).toBeGreaterThan(0);
+    const replay = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/otp/verify',
+      payload: { email, code, dateOfBirth: '1990-01-01', displayName: 'Replay' },
+    });
+    expect(replay.statusCode).toBe(401);
+    await db.otpChallenge.updateMany({
+      where: { email },
+      data: { createdAt: new Date(Date.now() - 31_000) },
+    });
+    const next = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/otp/request',
+      payload: { email },
+    });
+    const changedAge = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/otp/verify',
+      payload: {
+        email,
+        code: next.json<{ developmentCode: string }>().developmentCode,
+        dateOfBirth: '1990-01-01',
+        displayName: 'Replay',
+      },
+    });
+    expect(changedAge.statusCode).toBe(403);
+    expect(await db.user.findUnique({ where: { email } })).toBeNull();
+  });
+
+  it('consumes an OTP once even when two verification requests race', async () => {
+    const email = `otp-race-${testRunId}@orbit.local`;
+    const requested = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/otp/request',
+      remoteAddress: '127.6.0.1',
+      payload: { email },
+    });
+    const code = requested.json<{ developmentCode: string }>().developmentCode;
+    const responses = await Promise.all(
+      [1, 2].map(() =>
+        app.inject({
+          method: 'POST',
+          url: '/v1/auth/otp/verify',
+          remoteAddress: '127.6.0.1',
+          payload: { email, code, dateOfBirth: '1990-01-01', displayName: 'Race Tester' },
+        }),
+      ),
+    );
+    expect(responses.map((response) => response.statusCode).sort()).toEqual([200, 401]);
+    expect(await db.user.count({ where: { email } })).toBe(1);
+  });
+
+  it('reserves model allowance atomically across concurrent calls', async () => {
+    const tokens = await signIn(`budget-race-${testRunId}@orbit.local`, 'Budget Tester');
+    expect(tokens.accessToken).toBeTruthy();
+    const user = await db.user.findUniqueOrThrow({
+      where: { email: `budget-race-${testRunId}@orbit.local` },
+    });
+    const ledger = new PrismaCostLedger(db);
+    const results = await Promise.allSettled([
+      ledger.reserve(user.id, 0.75, 1, 10_000),
+      ledger.reserve(user.id, 0.75, 1, 10_000),
+    ]);
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
+    expect(await ledger.userSpendToday(user.id)).toBeCloseTo(0.75);
+    const id = results.find((result) => result.status === 'fulfilled');
+    if (id?.status !== 'fulfilled') throw new Error('Reservation missing');
+    await ledger.record(
+      {
+        userId: user.id,
+        task: 'interview',
+        provider: 'stub',
+        model: 'test',
+        tokensIn: 10,
+        tokensOut: 10,
+        costCents: 0.25,
+        latencyMs: 1,
+      },
+      id.value,
+    );
+    expect(await ledger.userSpendToday(user.id)).toBeCloseTo(0.25);
+  });
+
+  it('caps account creation per network and across the deployment', async () => {
+    const limitedIp = `127.7.${String(Number.parseInt(testRunId.slice(0, 2), 16))}.${String(Number.parseInt(testRunId.slice(2, 4), 16))}`;
+    const limited = await buildApp(db, { ...config, ACCOUNT_CREATION_PER_IP_PER_DAY: 1 });
+    try {
+      const results = [];
+      for (const suffix of ['a', 'b']) {
+        const email = `signup-cap-${suffix}-${testRunId}@orbit.local`;
+        const requested = await limited.inject({
+          method: 'POST',
+          url: '/v1/auth/otp/request',
+          remoteAddress: limitedIp,
+          payload: { email },
+        });
+        const code = requested.json<{ developmentCode: string }>().developmentCode;
+        results.push(
+          await limited.inject({
+            method: 'POST',
+            url: '/v1/auth/otp/verify',
+            remoteAddress: limitedIp,
+            payload: { email, code, dateOfBirth: '1990-01-01', displayName: 'Cap Tester' },
+          }),
+        );
+      }
+      expect(results.map((result) => result.statusCode)).toEqual([200, 429]);
+      expect(results[1]?.body).toContain('ACCOUNT_CREATION_RATE_LIMITED');
+    } finally {
+      await limited.close();
+    }
+    const full = await buildApp(db, { ...config, DEPLOYMENT_ACCOUNT_CAP: 1 });
+    try {
+      const email = `deployment-full-${testRunId}@orbit.local`;
+      const requested = await full.inject({
+        method: 'POST',
+        url: '/v1/auth/otp/request',
+        remoteAddress: '127.7.0.2',
+        payload: { email },
+      });
+      const response = await full.inject({
+        method: 'POST',
+        url: '/v1/auth/otp/verify',
+        remoteAddress: '127.7.0.2',
+        payload: {
+          email,
+          code: requested.json<{ developmentCode: string }>().developmentCode,
+          dateOfBirth: '1990-01-01',
+          displayName: 'Cap Tester',
+        },
+      });
+      expect(response.statusCode).toBe(503);
+      expect(response.body).toContain('EARLY_ACCESS_FULL');
+    } finally {
+      await full.close();
+    }
+  });
+
+  it('keeps a named returning account out of onboarding and cancels scheduled deletion', async () => {
+    const email = `returning-${testRunId}@orbit.local`;
+    const tokens = await signIn(email, 'Returning Tester');
+    const headers = { authorization: `Bearer ${tokens.accessToken}` };
+    await app.inject({
+      method: 'POST',
+      url: '/v1/agent',
+      headers,
+      payload: { name: 'Unnamed private agent' },
+    });
+    const named = await app.inject({
+      method: 'PATCH',
+      url: '/v1/agent',
+      headers,
+      payload: { name: 'North' },
+    });
+    expect(named.statusCode).toBe(200);
+    await db.otpChallenge.updateMany({
+      where: { email },
+      data: { createdAt: new Date(Date.now() - 31_000) },
+    });
+    const requested = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/otp/request',
+      remoteAddress: '127.7.0.3',
+      payload: { email },
+    });
+    const returned = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/otp/verify',
+      remoteAddress: '127.7.0.3',
+      payload: {
+        email,
+        code: requested.json<{ developmentCode: string }>().developmentCode,
+        dateOfBirth: '2000-01-01',
+        displayName: 'Returning Tester',
+      },
+    });
+    expect(returned.statusCode).toBe(200);
+    expect(returned.json<{ hasAgent: boolean }>().hasAgent).toBe(true);
+    const deletion = await app.inject({ method: 'DELETE', url: '/v1/me', headers });
+    expect(deletion.statusCode).toBe(202);
+    const countdown = await app.inject({ method: 'GET', url: '/v1/me/deletion', headers });
+    expect(countdown.body).toContain('true');
+    const cancelled = await app.inject({ method: 'POST', url: '/v1/me/deletion/cancel', headers });
+    expect(cancelled.statusCode).toBe(200);
+    const final = await app.inject({ method: 'GET', url: '/v1/me/deletion', headers });
+    expect(final.json<{ pending: boolean }>().pending).toBe(false);
   });
 
   it('rate-limits OTP abuse and does not enumerate whether an account exists', async () => {
     const existing = await app.inject({
       method: 'POST',
       url: '/v1/auth/otp/request',
-      payload: { email: 'demo@orbit.local' },
+      payload: { email: 'person02@orbit.demo' },
       remoteAddress: `127.1.${String(Number.parseInt(testRunId.slice(0, 2), 16) % 250)}.1`,
     });
     const unknown = await app.inject({
@@ -155,7 +355,7 @@ describe.runIf(enabled)('ORBIT API integration', () => {
         await app.inject({
           method: 'POST',
           url: '/v1/auth/otp/request',
-          payload: { email: `abuse-${testRunId}@orbit.local` },
+          payload: { email: `abuse-${String(index)}-${testRunId}@orbit.local` },
           remoteAddress: abusiveIp,
         }),
       );
@@ -258,6 +458,8 @@ describe.runIf(enabled)('ORBIT API integration', () => {
     expect(archive.statusCode).toBe(200);
     expect(archive.headers['content-type']).toContain('application/zip');
     expect(archive.rawPayload.byteLength).toBeGreaterThan(100);
+    expect(verifyExportArchive(archive.rawPayload, config.EXPORT_SIGNING_SECRET).valid).toBe(true);
+    expect(verifyExportArchive(archive.rawPayload, 'not-the-signing-key').valid).toBe(false);
   });
 
   it('reveals only mutually consented fields and never exposes raw messages', async () => {
@@ -535,7 +737,6 @@ describe.runIf(enabled)('ORBIT API integration', () => {
     });
     const router = new ModelRouter(
       configFromEnvironment({
-        ...process.env,
         LLM_DEFAULT_PROVIDER: 'stub',
         USER_DAILY_COST_CAP_CENTS: '35',
       }),

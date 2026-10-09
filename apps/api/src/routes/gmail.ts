@@ -191,6 +191,24 @@ const parseMessageDate = (value: string): Date | null => {
 const gmailMessageSourceUrl = (messageId: string): string =>
   `https://mail.google.com/mail/u/0/#all/${encodeURIComponent(messageId)}`;
 
+const derivedEmailSignals = (body: string): Record<string, string | boolean | null> => {
+  const normalized = body.replaceAll(/\s+/gu, ' ').trim();
+  const commitment = /\b(?:i['’]ll|i will|we['’]ll|we will)\s+([^.!?]{5,220})/iu.exec(normalized);
+  const dateMention =
+    /\b(?:due|deadline|by|on|before)\s+((?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{1,2}(?:,?\s+\d{4})?|today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/iu.exec(
+      normalized,
+    );
+  const renewal = /\b(?:subscription|renewal|renews?|membership|trial ends?)\b/iu.exec(normalized);
+  return {
+    needsReply: /\?|\b(?:could you|can you|please|let me know|would you|are you able)\b/iu.test(
+      normalized,
+    ),
+    commitment: commitment?.[0]?.slice(0, 280) ?? null,
+    dateMention: dateMention?.[0]?.slice(0, 120) ?? null,
+    renewal: renewal?.[0]?.slice(0, 80) ?? null,
+  };
+};
+
 const gmailMessagesForCatch = async (
   accessToken: string,
 ): Promise<readonly Record<string, unknown>[]> => {
@@ -294,7 +312,17 @@ export const registerGmailRoutes = (app: FastifyInstance, services: Services): v
     const auth = await requireAuth(request, services.config);
     const connection = await services.db.connection.findUnique({
       where: { userId_provider: { userId: auth.id, provider: ConnectionProvider.GOOGLE } },
-      select: { id: true, status: true, scopes: true, lastSyncedAt: true, deletedAt: true },
+      select: {
+        id: true,
+        status: true,
+        scopes: true,
+        lastSyncedAt: true,
+        deletedAt: true,
+        syncStatus: true,
+        syncProcessed: true,
+        syncTotal: true,
+        syncStartedAt: true,
+      },
     });
     return {
       available: available(services),
@@ -312,6 +340,10 @@ export const registerGmailRoutes = (app: FastifyInstance, services: Services): v
               status: connection.status.toLowerCase(),
               scopes: connection.scopes,
               lastSyncedAt: connection.lastSyncedAt?.toISOString() ?? null,
+              syncStatus: connection.syncStatus,
+              syncProcessed: connection.syncProcessed,
+              syncTotal: connection.syncTotal,
+              syncStartedAt: connection.syncStartedAt?.toISOString() ?? null,
             }
           : null,
     };
@@ -348,7 +380,7 @@ export const registerGmailRoutes = (app: FastifyInstance, services: Services): v
   app.get('/v1/connections/gmail/callback', async (request, reply) => {
     requireAvailable(services);
     const query = request.query as Record<string, unknown>;
-    if (typeof query.code !== 'string' || typeof query.state !== 'string') {
+    if (typeof query.state !== 'string') {
       throw new ApiError(400, 'OAUTH_CALLBACK_INVALID', 'Google authorization was incomplete.');
     }
     const challenge = await services.db.otpChallenge.findFirst({
@@ -368,12 +400,40 @@ export const registerGmailRoutes = (app: FastifyInstance, services: Services): v
         'The Google authorization state expired or was already used.',
       );
     }
-    const token = await tokenRequest(services, {
-      grant_type: 'authorization_code',
-      code: query.code,
-      redirect_uri: services.config.GOOGLE_OAUTH_REDIRECT_URI ?? '',
-    });
+    if (typeof query.error === 'string') {
+      await services.db.otpChallenge.update({
+        where: { id: challenge.id },
+        data: { consumedAt: new Date() },
+      });
+      const outcome = query.error === 'access_denied' ? 'denied' : 'failed';
+      return reply.redirect(`${services.config.ORBIT_MOBILE_REDIRECT_URL}?gmail=${outcome}`);
+    }
+    if (typeof query.code !== 'string') {
+      await services.db.otpChallenge.update({
+        where: { id: challenge.id },
+        data: { consumedAt: new Date() },
+      });
+      return reply.redirect(`${services.config.ORBIT_MOBILE_REDIRECT_URL}?gmail=incomplete`);
+    }
+    let token: Record<string, unknown>;
+    try {
+      token = await tokenRequest(services, {
+        grant_type: 'authorization_code',
+        code: query.code,
+        redirect_uri: services.config.GOOGLE_OAUTH_REDIRECT_URI ?? '',
+      });
+    } catch {
+      await services.db.otpChallenge.update({
+        where: { id: challenge.id },
+        data: { consumedAt: new Date() },
+      });
+      return reply.redirect(`${services.config.ORBIT_MOBILE_REDIRECT_URL}?gmail=failed`);
+    }
     if (typeof token.refresh_token !== 'string' || typeof token.access_token !== 'string') {
+      await services.db.otpChallenge.update({
+        where: { id: challenge.id },
+        data: { consumedAt: new Date() },
+      });
       throw new ApiError(
         502,
         'GOOGLE_REFRESH_TOKEN_MISSING',
@@ -382,6 +442,10 @@ export const registerGmailRoutes = (app: FastifyInstance, services: Services): v
     }
     const grantedScopes = typeof token.scope === 'string' ? token.scope.split(' ') : [];
     if (!googleReadonlyScopes.every((scope) => grantedScopes.includes(scope))) {
+      await services.db.otpChallenge.update({
+        where: { id: challenge.id },
+        data: { consumedAt: new Date() },
+      });
       throw new ApiError(
         403,
         'GOOGLE_SCOPE_MISSING',
@@ -444,127 +508,169 @@ export const registerGmailRoutes = (app: FastifyInstance, services: Services): v
     });
     if (connection === null)
       throw new ApiError(409, 'GMAIL_NOT_CONNECTED', 'Connect Gmail before syncing.');
-    const accessToken = await accessTokenFor(services, connection);
-    const profile = await gmailJson('/profile', accessToken);
-    const accountEmail =
-      typeof profile.emailAddress === 'string' ? profile.emailAddress.toLowerCase() : '';
-    const messages = await gmailMessagesForCatch(accessToken);
-    const rules = await services.db.screeningRule.findMany({
-      where: { userId: auth.id, deletedAt: null },
-      orderBy: { priority: 'asc' },
-    });
-    let imported = 0;
-    let inboxImported = 0;
-    for (const summary of messages) {
-      const messageId = summary.id;
-      if (typeof messageId !== 'string') continue;
-      const sourceExists = await services.db.sourceDocument.findUnique({
-        where: {
-          userId_kind_externalId: {
-            userId: auth.id,
-            kind: SourceDocumentKind.GMAIL_MESSAGE,
-            externalId: messageId,
-          },
-        },
-        select: { id: true },
-      });
-      if (sourceExists !== null) continue;
-      const kind = `gmail:${messageId}`;
-      const existing = await services.db.inboxItem.findFirst({
-        where: { recipientUserId: auth.id, kind },
-      });
-      const message = await gmailJson(
-        `/messages/${encodeURIComponent(messageId)}?format=full`,
-        accessToken,
-      );
-      const payload = asRecord(message.payload);
-      const subject = headerValue(payload, 'Subject') || '(No subject)';
-      const from = headerValue(payload, 'From');
-      const to = headerValue(payload, 'To');
-      const date = parseMessageDate(headerValue(payload, 'Date'));
-      const snippet = typeof message.snippet === 'string' ? message.snippet : '';
-      const body = (plainBody(payload) || snippet).slice(0, 8_000);
-      const direction =
-        accountEmail.length > 0 && emailAddress(from) === accountEmail
-          ? SourceDocumentDirection.OUTBOUND
-          : SourceDocumentDirection.INBOUND;
-      const threadId = typeof message.threadId === 'string' ? message.threadId : undefined;
-      await services.db.sourceDocument.create({
-        data: {
-          userId: auth.id,
-          kind: SourceDocumentKind.GMAIL_MESSAGE,
-          direction,
-          externalId: messageId,
-          ...(threadId === undefined ? {} : { threadId }),
-          sourceUrl: gmailMessageSourceUrl(messageId),
-          title: subject,
-          sender: from || null,
-          recipients: to || null,
-          ...(date === null ? {} : { occurredAt: date }),
-          body,
-          metadata: {
-            labels: Array.isArray(message.labelIds) ? message.labelIds : [],
-            gmailInternalDate:
-              typeof message.internalDate === 'string' ? message.internalDate : null,
-          },
-        },
-      });
-      imported += 1;
-      if (direction !== SourceDocumentDirection.INBOUND || existing !== null) continue;
-      const rule = rules.find((candidate) =>
-        ruleMatches(asRecord(candidate.matchOn), from, subject),
-      );
-      const action = rule?.action ?? 'HOLD';
-      const triage =
-        action === 'DECLINE'
-          ? InboxTriage.AUTO_DECLINED
-          : action === 'ALLOW'
-            ? InboxTriage.ESCALATED
-            : InboxTriage.HELD;
-      await services.db.inboxItem.create({
-        data: {
-          recipientUserId: auth.id,
-          kind,
-          subject,
-          body: `From: ${from}\n\n${body}`,
-          triage,
-          agentReply: null,
-        },
-      });
-      if (triage === InboxTriage.ESCALATED) {
-        await queuePush(services.db, {
-          userId: auth.id,
-          eventType: 'approval',
-          title: 'A message needs your review',
-          body: subject,
-          deepLink: 'orbit://inbox',
-        });
-      }
-      inboxImported += 1;
-    }
-    const calendarImported = await syncCalendar(services, auth.id, accessToken);
-    const caught = await refreshLifeItems(services, auth.id);
     await services.db.connection.update({
       where: { id: connection.id },
-      data: { lastSyncedAt: new Date() },
+      data: {
+        syncStatus: 'authorizing',
+        syncProcessed: 0,
+        syncTotal: null,
+        syncStartedAt: new Date(),
+      },
     });
-    await logActivity(services.db, {
-      userId: auth.id,
-      actorType: 'AGENT',
-      action: 'connection.gmail_synced',
-      targetType: 'Connection',
-      targetId: connection.id,
-      payload: { imported, inboxImported, calendarImported, caught, daysRead: 90 },
-      requestId: request.id,
-    });
-    return {
-      ok: true,
-      imported,
-      inboxImported,
-      calendarImported,
-      caught,
-      examined: messages.length,
-    };
+    try {
+      const accessToken = await accessTokenFor(services, connection);
+      const profile = await gmailJson('/profile', accessToken);
+      const accountEmail =
+        typeof profile.emailAddress === 'string' ? profile.emailAddress.toLowerCase() : '';
+      const messages = await gmailMessagesForCatch(accessToken);
+      await services.db.connection.update({
+        where: { id: connection.id },
+        data: { syncStatus: 'reading_mail', syncProcessed: 0, syncTotal: messages.length },
+      });
+      const rules = await services.db.screeningRule.findMany({
+        where: { userId: auth.id, deletedAt: null },
+        orderBy: { priority: 'asc' },
+      });
+      let imported = 0;
+      let inboxImported = 0;
+      for (const [messageIndex, summary] of messages.entries()) {
+        if (messageIndex % 10 === 0) {
+          await services.db.connection.update({
+            where: { id: connection.id },
+            data: { syncProcessed: messageIndex },
+          });
+        }
+        const messageId = summary.id;
+        if (typeof messageId !== 'string') continue;
+        const sourceExists = await services.db.sourceDocument.findUnique({
+          where: {
+            userId_kind_externalId: {
+              userId: auth.id,
+              kind: SourceDocumentKind.GMAIL_MESSAGE,
+              externalId: messageId,
+            },
+          },
+          select: { id: true },
+        });
+        if (sourceExists !== null) continue;
+        const kind = `gmail:${messageId}`;
+        const existing = await services.db.inboxItem.findFirst({
+          where: { recipientUserId: auth.id, kind },
+        });
+        const message = await gmailJson(
+          `/messages/${encodeURIComponent(messageId)}?format=full`,
+          accessToken,
+        );
+        const payload = asRecord(message.payload);
+        const subject = headerValue(payload, 'Subject') || '(No subject)';
+        const from = headerValue(payload, 'From');
+        const to = headerValue(payload, 'To');
+        const date = parseMessageDate(headerValue(payload, 'Date'));
+        const snippet = typeof message.snippet === 'string' ? message.snippet : '';
+        const body = (plainBody(payload) || snippet).slice(0, 8_000);
+        const derived = derivedEmailSignals(body);
+        const direction =
+          accountEmail.length > 0 && emailAddress(from) === accountEmail
+            ? SourceDocumentDirection.OUTBOUND
+            : SourceDocumentDirection.INBOUND;
+        const threadId = typeof message.threadId === 'string' ? message.threadId : undefined;
+        await services.db.sourceDocument.create({
+          data: {
+            userId: auth.id,
+            kind: SourceDocumentKind.GMAIL_MESSAGE,
+            direction,
+            externalId: messageId,
+            ...(threadId === undefined ? {} : { threadId }),
+            sourceUrl: gmailMessageSourceUrl(messageId),
+            title: subject,
+            sender: from || null,
+            recipients: to || null,
+            ...(date === null ? {} : { occurredAt: date }),
+            body: '',
+            metadata: {
+              labels: Array.isArray(message.labelIds) ? message.labelIds : [],
+              gmailInternalDate:
+                typeof message.internalDate === 'string' ? message.internalDate : null,
+              derived,
+            },
+          },
+        });
+        imported += 1;
+        if (direction !== SourceDocumentDirection.INBOUND || existing !== null) continue;
+        const rule = rules.find((candidate) =>
+          ruleMatches(asRecord(candidate.matchOn), from, subject),
+        );
+        const action = rule?.action ?? 'HOLD';
+        const triage =
+          action === 'DECLINE'
+            ? InboxTriage.AUTO_DECLINED
+            : action === 'ALLOW'
+              ? InboxTriage.ESCALATED
+              : InboxTriage.HELD;
+        await services.db.inboxItem.create({
+          data: {
+            recipientUserId: auth.id,
+            kind,
+            subject,
+            body: `From: ${from}\n\nOpen the original email to read it. ORBIT does not retain Gmail message bodies.`,
+            triage,
+            agentReply: null,
+          },
+        });
+        if (triage === InboxTriage.ESCALATED) {
+          await queuePush(services.db, {
+            userId: auth.id,
+            eventType: 'approval',
+            title: 'A message needs your review',
+            body: subject,
+            deepLink: 'orbit://inbox',
+          });
+        }
+        inboxImported += 1;
+      }
+      await services.db.connection.update({
+        where: { id: connection.id },
+        data: { syncStatus: 'reading_calendar', syncProcessed: messages.length },
+      });
+      const calendarImported = await syncCalendar(services, auth.id, accessToken);
+      await services.db.connection.update({
+        where: { id: connection.id },
+        data: { syncStatus: 'building_catch' },
+      });
+      const caught = await refreshLifeItems(services, auth.id, request.id);
+      await services.db.connection.update({
+        where: { id: connection.id },
+        data: {
+          lastSyncedAt: new Date(),
+          syncStatus: 'idle',
+          syncProcessed: messages.length,
+          syncTotal: messages.length,
+        },
+      });
+      await logActivity(services.db, {
+        userId: auth.id,
+        actorType: 'AGENT',
+        action: 'connection.gmail_synced',
+        targetType: 'Connection',
+        targetId: connection.id,
+        payload: { imported, inboxImported, calendarImported, caught, daysRead: 90 },
+        requestId: request.id,
+      });
+      return {
+        ok: true,
+        imported,
+        inboxImported,
+        calendarImported,
+        caught,
+        examined: messages.length,
+      };
+    } catch (error: unknown) {
+      await services.db.connection.update({
+        where: { id: connection.id },
+        data: { syncStatus: 'error' },
+      });
+      throw error;
+    }
   });
 
   app.delete('/v1/connections/gmail', async (request, reply) => {

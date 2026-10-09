@@ -91,9 +91,10 @@ describe.runIf(enabled)('watcher worker integration', () => {
         Prisma.sql`UPDATE "Agent" SET "profileEmbedding" = ${vector}::vector WHERE "id" = ${agent.id}`,
       );
     }
-    const before = await db.introduction.count();
+    const participants = { OR: [{ userAId: userA.id }, { userBId: userA.id }] };
+    const before = await db.introduction.count({ where: participants });
     const result = await runNightly(db, createModelRouter(db, config), config);
-    const after = await db.introduction.count();
+    const after = await db.introduction.count({ where: participants });
     expect(result.introductions).toBe(1);
     expect(after).toBe(before + 1);
     const generated = await db.introduction.findFirstOrThrow({

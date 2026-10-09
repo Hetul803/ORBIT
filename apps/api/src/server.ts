@@ -1,4 +1,5 @@
 import { createPrismaClient } from '@orbit/db';
+import { scrubTelemetryEvent } from '@orbit/shared';
 import * as Sentry from '@sentry/node';
 
 import { buildApp } from './app.js';
@@ -6,7 +7,14 @@ import { loadConfig } from './config.js';
 
 const config = loadConfig();
 if (config.SENTRY_DSN !== undefined) {
-  Sentry.init({ dsn: config.SENTRY_DSN, environment: config.SENTRY_ENVIRONMENT });
+  Sentry.init({
+    dsn: config.SENTRY_DSN,
+    environment: config.SENTRY_ENVIRONMENT,
+    tracesSampleRate: 0.1,
+    beforeBreadcrumb: () => null,
+    beforeSend: scrubTelemetryEvent,
+    beforeSendTransaction: scrubTelemetryEvent,
+  });
 }
 const db = createPrismaClient(config.DATABASE_URL);
 const app = await buildApp(db, config);

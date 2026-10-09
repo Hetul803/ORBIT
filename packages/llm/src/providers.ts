@@ -58,7 +58,7 @@ const defaultStubResponse = (request: ProviderRequest): string => {
   if (request.model.includes('draft')) {
     return 'Thanks for reaching out. I am interested; let me check the details before we set anything.';
   }
-  return 'I care most about whether our users would genuinely work well together. What would a good first meeting look like for yours?';
+  return 'A constraint for my user is that a first meeting cannot override their existing routine. What tradeoff or difference would your user need us to test?';
 };
 
 export class OpenAiProvider implements LlmProvider {

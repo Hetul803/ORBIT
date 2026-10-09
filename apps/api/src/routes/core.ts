@@ -20,6 +20,7 @@ import {
   upsertIntentSchema,
 } from '@orbit/shared';
 import AdmZip from 'adm-zip';
+import { CostCapError } from '@orbit/llm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 
@@ -421,7 +422,7 @@ export const registerCoreRoutes = (app: FastifyInstance, services: Services): vo
     const body = parseWith(updateAgentSchema, request.body);
     const current = await requireOwnedAgent(services.db, auth.id);
     const data: Prisma.AgentUpdateInput = {
-      ...(body.name === undefined ? {} : { name: body.name }),
+      ...(body.name === undefined ? {} : { name: body.name, onboardingCompletedAt: new Date() }),
       ...(body.autonomyDefaults === undefined ? {} : { autonomyDefaults: body.autonomyDefaults }),
     };
     const agent = await services.db.agent.update({ where: { id: current.id }, data });
@@ -466,6 +467,7 @@ export const registerCoreRoutes = (app: FastifyInstance, services: Services): vo
       ? undefined
       : interviewQuestions[answers.length];
     let adaptive = false;
+    let modelNotice: string | null = null;
     if (!complete) {
       try {
         const completion = await services.llm.complete({
@@ -496,8 +498,12 @@ export const registerCoreRoutes = (app: FastifyInstance, services: Services): vo
           nextQuestion = parsed.question.trim();
           adaptive = completion.provider !== 'stub';
         }
-      } catch {
+      } catch (error: unknown) {
         // The bounded deterministic question set remains available if a configured provider fails.
+        modelNotice =
+          error instanceof CostCapError
+            ? 'Your answer is saved. The daily model budget is reached; using fixed interview questions until it resets at midnight UTC.'
+            : 'Your answer is saved. Adaptive questions are temporarily unavailable; using fixed interview questions.';
       }
     }
     const learnedFact = await services.db.$transaction(async (tx) => {
@@ -535,13 +541,21 @@ export const registerCoreRoutes = (app: FastifyInstance, services: Services): vo
       }
       return fact;
     });
-    const embeddingReady = await embedMemoryAndProfile(
-      services,
-      learnedFact.id,
-      agent.id,
-      learnedFact.content,
-      { userId: auth.id, runId: run.id, requestId: request.id },
-    );
+    let embeddingReady = false;
+    try {
+      embeddingReady = await embedMemoryAndProfile(
+        services,
+        learnedFact.id,
+        agent.id,
+        learnedFact.content,
+        { userId: auth.id, runId: run.id, requestId: request.id },
+      );
+    } catch (error: unknown) {
+      modelNotice =
+        error instanceof CostCapError
+          ? 'Your answer is saved. Semantic indexing paused at the daily budget cap, which resets at midnight UTC.'
+          : 'Your answer is saved, but semantic indexing could not finish. Your written memory remains available.';
+    }
     return {
       sessionId: run.id,
       question: complete
@@ -551,6 +565,7 @@ export const registerCoreRoutes = (app: FastifyInstance, services: Services): vo
       complete,
       adaptive,
       embeddingReady,
+      modelNotice,
       learnedFacts: [{ kind: newFactKind, content: body.answer }],
       profilePreview: answers.map((answer, index) => ({
         label: `Signal ${String(index + 1)}`,

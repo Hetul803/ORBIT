@@ -5,6 +5,7 @@
     "dockerfilePath": "infra/Dockerfile.worker",
     "watchPatterns": [
       "apps/worker/**",
+      "scripts/**",
       "packages/**",
       "infra/Dockerfile.worker",
       "package.json",

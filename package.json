@@ -11,10 +11,11 @@
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev --parallel",
+    "pretypecheck": "pnpm db:generate",
     "typecheck": "turbo run typecheck",
     "lint": "turbo run lint",
-    "test": "turbo run test",
-    "test:coverage": "turbo run test:coverage",
+    "test": "turbo run test && node --test scripts/*.test.mjs",
+    "test:coverage": "turbo run test:coverage && node --test scripts/*.test.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "db:generate": "pnpm --filter @orbit/db generate",
@@ -27,11 +28,13 @@
     "benchmark:retrieval": "pnpm --filter @orbit/worker benchmark:retrieval",
     "smoke:web-watcher": "pnpm --filter @orbit/worker smoke:web-watcher",
     "verify:export": "pnpm --filter @orbit/api verify:export",
+    "secrets:generate": "node scripts/generate-production-secrets.mjs",
     "mobile": "pnpm --filter @orbit/mobile start",
     "ci": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
+    "@sentry/cli": "2.58.4",
     "@types/node": "24.19.0",
     "eslint": "10.11.0",
     "prettier": "3.9.9",

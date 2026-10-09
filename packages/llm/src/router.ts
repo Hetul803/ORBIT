@@ -43,6 +43,18 @@ const computeCostCents = (tokensIn: number, tokensOut: number, price: ModelPrice
   (tokensIn * price.inputCostPerMillionTokens + tokensOut * price.outputCostPerMillionTokens) /
   1_000_000;
 
+const estimateInputTokens = (request: CompleteRequest): number =>
+  Math.max(
+    1,
+    request.messages.reduce(
+      (total, message) => total + new TextEncoder().encode(message.content).length + 128,
+      0,
+    ) +
+      (request.tools === undefined
+        ? 0
+        : new TextEncoder().encode(JSON.stringify(request.tools)).length),
+  );
+
 export class ModelRouter {
   private readonly circuits = new Map<string, CircuitState>();
 
@@ -55,7 +67,6 @@ export class ModelRouter {
   ) {}
 
   public async complete(request: CompleteRequest): Promise<CompleteResponse> {
-    await this.enforceCaps(request.userId);
     const taskConfig = this.config.tasks[request.task];
     const primaryCircuitKey = `${taskConfig.provider}:${taskConfig.primary}`;
     const useFallbackFirst = this.isCircuitOpen(primaryCircuitKey);
@@ -82,6 +93,25 @@ export class ModelRouter {
       for (let retry = 0; retry <= this.config.maxRetries; retry += 1) {
         const startedAt = Date.now();
         try {
+          const price =
+            (await this.priceResolver?.priceFor(provider.name, attempt.model)) ??
+            configuredPrice(taskConfig, attempt.fallback);
+          const projectedCostCents = computeCostCents(
+            estimateInputTokens(request),
+            request.constraints.maxOutputTokens,
+            price,
+          );
+          // Recheck immediately before every paid attempt. This includes retries and
+          // fallback providers; a cap reached by another call stops the next attempt.
+          const reservationId =
+            this.ledger.reserve === undefined
+              ? (await this.enforceCaps(request.userId, projectedCostCents), undefined)
+              : await this.ledger.reserve(
+                  request.userId,
+                  projectedCostCents,
+                  this.config.userDailyCapCents,
+                  this.config.globalDailyCapCents,
+                );
           const apiKeyOverride =
             request.apiKeyOverride ??
             (await this.apiKeyResolver?.(request.userId, attempt.provider));
@@ -94,26 +124,26 @@ export class ModelRouter {
           };
           const result = await provider.complete(providerRequest);
           const latencyMs = Date.now() - startedAt;
-          const price =
-            (await this.priceResolver?.priceFor(provider.name, attempt.model)) ??
-            configuredPrice(taskConfig, attempt.fallback);
           const costCents = computeCostCents(result.tokensIn, result.tokensOut, price);
           this.recordSuccess(`${attempt.provider}:${attempt.model}`);
-          await this.ledger.record({
-            userId: request.userId,
-            ...(request.runId === undefined ? {} : { runId: request.runId }),
-            ...(request.conversationId === undefined
-              ? {}
-              : { conversationId: request.conversationId }),
-            task: request.task,
-            provider: provider.name,
-            model: attempt.model,
-            tokensIn: result.tokensIn,
-            tokensOut: result.tokensOut,
-            costCents,
-            latencyMs,
-            ...(request.requestId === undefined ? {} : { requestId: request.requestId }),
-          });
+          await this.ledger.record(
+            {
+              userId: request.userId,
+              ...(request.runId === undefined ? {} : { runId: request.runId }),
+              ...(request.conversationId === undefined
+                ? {}
+                : { conversationId: request.conversationId }),
+              task: request.task,
+              provider: provider.name,
+              model: attempt.model,
+              tokensIn: result.tokensIn,
+              tokensOut: result.tokensOut,
+              costCents,
+              latencyMs,
+              ...(request.requestId === undefined ? {} : { requestId: request.requestId }),
+            },
+            reservationId,
+          );
           return {
             ...result,
             provider: provider.name,
@@ -124,6 +154,7 @@ export class ModelRouter {
           };
         } catch (error: unknown) {
           finalError = error instanceof Error ? error : new Error(String(error));
+          if (finalError instanceof CostCapError) throw finalError;
           this.recordFailure(`${attempt.provider}:${attempt.model}`);
           if (retry < this.config.maxRetries) await sleep(50 * 2 ** retry);
         }
@@ -133,15 +164,21 @@ export class ModelRouter {
     throw finalError ?? new Error('No LLM provider could complete the request');
   }
 
-  private async enforceCaps(userId: string): Promise<void> {
+  private async enforceCaps(userId: string, projectedCostCents: number): Promise<void> {
     const [userSpend, globalSpend] = await Promise.all([
       this.ledger.userSpendToday(userId),
       this.ledger.globalSpendToday(),
     ]);
-    if (userSpend >= this.config.userDailyCapCents) {
+    if (
+      userSpend >= this.config.userDailyCapCents ||
+      userSpend + projectedCostCents > this.config.userDailyCapCents
+    ) {
       throw new CostCapError('The daily model budget for this user has been reached.', 'user');
     }
-    if (globalSpend >= this.config.globalDailyCapCents) {
+    if (
+      globalSpend >= this.config.globalDailyCapCents ||
+      globalSpend + projectedCostCents > this.config.globalDailyCapCents
+    ) {
       throw new CostCapError('The platform daily model budget has been reached.', 'global');
     }
   }
@@ -261,6 +298,18 @@ export const configFromEnvironment = (environment: NodeJS.ProcessEnv): ModelRout
           environment[tierKey(tier, 'FALLBACK_MODEL')] ??
           environment.LLM_CHEAP_FALLBACK_MODEL ??
           'stub-fallback-v1';
+        if (environment.NODE_ENV === 'production') {
+          if (
+            provider === 'stub' ||
+            fallbackProvider === 'stub' ||
+            primary.startsWith('stub-') ||
+            fallback.startsWith('stub-')
+          ) {
+            throw new Error(
+              `Production configuration error: ${modelKey(task)} and its fallback must select real models and providers`,
+            );
+          }
+        }
         return [
           task,
           {

@@ -91,7 +91,13 @@ export interface ModelCallRecord {
 export interface CostLedger {
   userSpendToday(userId: string): Promise<number>;
   globalSpendToday(): Promise<number>;
-  record(call: ModelCallRecord): Promise<void>;
+  record(call: ModelCallRecord, reservationId?: string): Promise<void>;
+  reserve?(
+    userId: string,
+    projectedCostCents: number,
+    userCapCents: number,
+    globalCapCents: number,
+  ): Promise<string>;
 }
 
 export type ApiKeyResolver = (userId: string, provider: string) => Promise<string | undefined>;

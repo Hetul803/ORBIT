@@ -75,6 +75,7 @@ export const runDeletion = async (
       await tx.screeningRule.deleteMany({ where: { userId: user.id } });
       await tx.dailyBrief.deleteMany({ where: { userId: user.id } });
       await tx.modelCall.deleteMany({ where: { userId: user.id } });
+      await tx.modelBudgetReservation.deleteMany({ where: { userId: user.id } });
       await tx.block.deleteMany({
         where: { OR: [{ blockerUserId: user.id }, { blockedUserId: user.id }] },
       });
@@ -107,6 +108,7 @@ export const runDeletion = async (
           campusId: null,
           locale: 'en',
           timezone: 'UTC',
+          signupIpHash: null,
           deletedAt: new Date(),
         },
       });

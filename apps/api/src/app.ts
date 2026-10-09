@@ -8,6 +8,7 @@ import rateLimit from '@fastify/rate-limit';
 import sensible from '@fastify/sensible';
 import websocket from '@fastify/websocket';
 import type { PrismaClient } from '@orbit/db';
+import { CostCapError } from '@orbit/llm';
 import * as Sentry from '@sentry/node';
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import { z } from 'zod';
@@ -18,6 +19,7 @@ import { ApiError } from './errors.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerCoreRoutes } from './routes/core.js';
 import { registerGmailRoutes } from './routes/gmail.js';
+import { registerLegalRoutes } from './routes/legal.js';
 import { registerLifeRoutes } from './routes/life.js';
 import { registerPushRoutes } from './routes/push.js';
 import { registerProfileRoutes } from './routes/profile.js';
@@ -31,14 +33,18 @@ const tracer = trace.getTracer('orbit-api');
 
 const registerObservability = (app: FastifyInstance): void => {
   const spans = new WeakMap<FastifyRequest, Span>();
-  app.addHook('onRequest', (request, _reply, done) => {
-    const span = tracer.startSpan(`${request.method} ${request.routeOptions.url ?? request.url}`, {
-      attributes: {
-        'http.request.method': request.method,
-        'url.path': request.url,
-        'orbit.request_id': request.id,
+  app.addHook('onRequest', (request, reply, done) => {
+    void reply.header('x-request-id', request.id);
+    const span = tracer.startSpan(
+      `${request.method} ${request.routeOptions.url ?? '[unmatched]'}`,
+      {
+        attributes: {
+          'http.request.method': request.method,
+          'url.path': request.routeOptions.url ?? '[unmatched]',
+          'orbit.request_id': request.id,
+        },
       },
-    });
+    );
     spans.set(request, span);
     done();
   });
@@ -48,7 +54,7 @@ const registerObservability = (app: FastifyInstance): void => {
     span?.end();
   });
   app.addHook('onError', async (request, _reply, error) => {
-    spans.get(request)?.recordException(error);
+    spans.get(request)?.recordException({ name: error.name, message: 'Details omitted' });
   });
 };
 
@@ -82,20 +88,33 @@ const registerRealtime = async (app: FastifyInstance, services: Services): Promi
 
 export const buildApp = async (db: PrismaClient, config: ApiConfig): Promise<FastifyInstance> => {
   const app = Fastify({
+    trustProxy:
+      config.TRUSTED_PROXY_CIDRS.trim().length === 0
+        ? false
+        : config.TRUSTED_PROXY_CIDRS.split(',').map((entry) => entry.trim()),
     logger: {
       level: config.LOG_LEVEL,
+      serializers: {
+        req: (request) => ({
+          method: request.method,
+          url: request.routeOptions.url ?? '[unmatched]',
+        }),
+        err: (error) => ({
+          type: error instanceof Error ? error.name : 'UnknownError',
+          message: 'Details omitted',
+          stack: '',
+        }),
+      },
       redact: [
         'req.headers.authorization',
-        'req.body.apiKey',
-        'req.body.refreshToken',
+        'req.headers.cookie',
+        'req.query.access_token',
+        'req.body',
         'res.headers.set-cookie',
       ],
     },
-    requestIdHeader: 'x-request-id',
-    genReqId: (request) =>
-      typeof request.headers['x-request-id'] === 'string'
-        ? request.headers['x-request-id']
-        : randomUUID(),
+    requestIdHeader: false,
+    genReqId: () => randomUUID(),
   });
   const services = createServices(db, config);
   registerObservability(app);
@@ -126,6 +145,7 @@ export const buildApp = async (db: PrismaClient, config: ApiConfig): Promise<Fas
     await db.$queryRaw`SELECT 1`;
     return { ok: true, database: 'ready', at: new Date().toISOString() };
   });
+  registerLegalRoutes(app);
 
   registerAuthRoutes(app, services);
   registerCoreRoutes(app, services);
@@ -142,7 +162,7 @@ export const buildApp = async (db: PrismaClient, config: ApiConfig): Promise<Fas
     throw new ApiError(
       404,
       'ROUTE_NOT_FOUND',
-      `No route matches ${request.method} ${request.url}.`,
+      `No route matches ${request.method} ${request.url.split('?')[0] ?? '/'}.`,
     );
   });
 
@@ -167,6 +187,16 @@ export const buildApp = async (db: PrismaClient, config: ApiConfig): Promise<Fas
         },
       });
     }
+    if (error instanceof CostCapError) {
+      return reply.code(429).send({
+        error: {
+          code: 'MODEL_COST_CAP_REACHED',
+          message: error.message,
+          requestId: request.id,
+          details: { scope: error.scope },
+        },
+      });
+    }
     const statusCode =
       typeof error === 'object' &&
       error !== null &&
@@ -183,7 +213,10 @@ export const buildApp = async (db: PrismaClient, config: ApiConfig): Promise<Fas
         },
       });
     }
-    request.log.error({ err: error, requestId: request.id }, 'unhandled request error');
+    request.log.error(
+      { errorType: error instanceof Error ? error.name : 'UnknownError', requestId: request.id },
+      'unhandled request error',
+    );
     if (config.SENTRY_DSN !== undefined) {
       Sentry.captureException(error, { tags: { requestId: request.id } });
     }

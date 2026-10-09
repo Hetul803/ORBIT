@@ -188,6 +188,7 @@ const storeConversation = async (
     intent: LoadedAgent['user']['intents'][number];
     router: ModelRouter;
     matchScore: number;
+    requestId?: string;
   },
 ): Promise<boolean> => {
   const run = await db.run.create({
@@ -223,6 +224,7 @@ const storeConversation = async (
         userId: input.source.userId,
         runId: run.id,
         conversationId: conversation.id,
+        ...(input.requestId === undefined ? {} : { requestId: input.requestId }),
       },
     );
     const status =
@@ -242,6 +244,18 @@ const storeConversation = async (
             turnIndex: turn.turnIndex,
             contentHash: turn.originalContentHash,
             redactedContent: turn.content,
+          },
+        });
+      }
+      if (result.redactionFailure !== null) {
+        await tx.redactionFailure.create({
+          data: {
+            conversationId: conversation.id,
+            turnIndex: result.redactionFailure.turnIndex,
+            category: result.redactionFailure.category,
+            pattern: result.redactionFailure.pattern,
+            source: result.redactionFailure.source,
+            ...(input.requestId === undefined ? {} : { requestId: input.requestId }),
           },
         });
       }
@@ -307,14 +321,17 @@ const storeConversation = async (
       db.run.update({
         where: { id: run.id },
         data: {
-          status: RunStatus.FAILED,
+          status: error instanceof CostCapError ? RunStatus.PAUSED_COST_CAP : RunStatus.FAILED,
           endedAt: new Date(),
           durationMs: Date.now() - startedAt,
           steps: [
             {
               name: 'Compatibility conversation',
               status: 'failed',
-              detail: error instanceof Error ? error.message : 'Unknown worker failure',
+              detail:
+                error instanceof CostCapError
+                  ? 'Matching paused at the daily model cost limit.'
+                  : 'The provider could not complete this matching attempt.',
               durationMs: Date.now() - startedAt,
             },
           ],
@@ -446,6 +463,7 @@ export const runNightly = async (
   db: PrismaClient,
   router: ModelRouter,
   config: WorkerConfig,
+  requestId?: string,
 ): Promise<{ introductions: number }> => {
   const agents = await loadAgents(db);
   const agentById = new Map(agents.map((agent) => [agent.id, agent]));
@@ -496,6 +514,7 @@ export const runNightly = async (
           {
             userId: source.userId,
             runId: run.id,
+            ...(requestId === undefined ? {} : { requestId }),
             outcomeExamples: await outcomeExamples(db, source.userId),
           },
         );
@@ -550,6 +569,7 @@ export const runNightly = async (
         intent,
         router,
         matchScore: top.rerankScore,
+        ...(requestId === undefined ? {} : { requestId }),
       });
       if (created) {
         introductions += 1;

@@ -12,7 +12,7 @@
     "test:integration": "vitest run tests/integration --exclude 'dist/**'",
     "test:coverage": "vitest run --coverage --exclude 'dist/**'",
     "dev": "tsx watch src/server.ts",
-    "start": "node dist/src/server.js",
+    "start": "node ../../scripts/prepare-sentry-service.mjs api && node dist/src/server.js",
     "verify:export": "tsx scripts/verify-export.ts"
   },
   "dependencies": {

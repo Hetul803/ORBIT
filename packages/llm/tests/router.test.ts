@@ -141,6 +141,17 @@ describe('provider router', () => {
     );
   });
 
+  it('refuses stub primary models or fallback providers in production', () => {
+    expect(() =>
+      configFromEnvironment({
+        NODE_ENV: 'production',
+        LLM_DEFAULT_PROVIDER: 'openrouter',
+        LLM_INPUT_COST_CENTS_PER_MILLION_TOKENS: '20',
+        LLM_OUTPUT_COST_CENTS_PER_MILLION_TOKENS: '100',
+      }),
+    ).toThrow('real models and providers');
+  });
+
   it('maps explicit cheap, mid, and strong tiers without changing task call sites', () => {
     const loaded = configFromEnvironment({
       LLM_DEFAULT_PROVIDER: 'openrouter',
@@ -211,6 +222,25 @@ describe('provider router', () => {
     const router = new ModelRouter(config, new Map([['stub', new StubProvider()]]), ledger);
     await expect(router.complete(request)).rejects.toBeInstanceOf(CostCapError);
     expect(ledger.calls).toHaveLength(0);
+  });
+
+  it('rechecks the cap before a retry instead of spending through the limit', async () => {
+    const ledger = new Ledger();
+    let providerCalls = 0;
+    const provider: LlmProvider = {
+      name: 'stub',
+      complete: async () => {
+        providerCalls += 1;
+        ledger.user = 10;
+        return Promise.reject(new Error('provider timeout after accepting the request'));
+      },
+    };
+    const retryingConfig = { ...config, maxRetries: 1 };
+    const router = new ModelRouter(retryingConfig, new Map([['stub', provider]]), ledger);
+    await expect(router.complete({ ...request, task: 'conversation' })).rejects.toBeInstanceOf(
+      CostCapError,
+    );
+    expect(providerCalls).toBe(1);
   });
 
   it('resolves a user BYOK key for the selected provider without logging it', async () => {

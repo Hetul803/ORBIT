@@ -53,10 +53,17 @@ const sourceToCitation = (source: SourceDocumentView, quote: string): SourceCita
 
 const shortQuote = (text: string): string => text.replaceAll(/\s+/gu, ' ').trim().slice(0, 280);
 
+const derivedSignals = (source: SourceDocumentView): Record<string, unknown> => {
+  if (typeof source.metadata !== 'object' || source.metadata === null) return {};
+  const derived = (source.metadata as Record<string, unknown>).derived;
+  return typeof derived === 'object' && derived !== null
+    ? (derived as Record<string, unknown>)
+    : {};
+};
+
 const messageNeedsReply = (source: SourceDocumentView): boolean => {
   if (source.direction !== SourceDocumentDirection.INBOUND) return false;
-  const value = `${source.title}\n${source.body}`.toLowerCase();
-  return /\?|\b(?:could you|can you|please|let me know|would you|are you able)\b/u.test(value);
+  return derivedSignals(source).needsReply === true;
 };
 
 const automatedSender = (source: SourceDocumentView): boolean =>
@@ -92,70 +99,61 @@ const lifeItemCandidate = (
       title: `Reply to ${person}`,
       detail: `Their message is the newest one in this thread, from ${String(days)} days ago.`,
       confidence: 0.96,
-      evidence: [sourceToCitation(source, shortQuote(source.body))],
+      evidence: [sourceToCitation(source, 'The newest inbound message asks for a response.')],
       draftForSource: source,
     };
   }
 
   if (source.direction === SourceDocumentDirection.OUTBOUND && days >= 1) {
-    const commitment = /\b(?:i['’]ll|i will|we['’]ll|we will)\s+([^.!?\n]{5,220})/iu.exec(
-      source.body,
-    );
-    if (commitment !== null && latest?.id === source.id) {
+    const commitment = derivedSignals(source).commitment;
+    if (typeof commitment === 'string' && latest?.id === source.id) {
       return {
         kind: LifeItemKind.NUDGE,
         stableKey: `your-commitment:${source.id}`,
         title: 'Check a promise you made',
-        detail: `You wrote: “${shortQuote(commitment[0])}” No later message appears in this thread.`,
+        detail: `You wrote: “${shortQuote(commitment)}” No later message appears in this thread.`,
         confidence: 0.88,
-        evidence: [sourceToCitation(source, shortQuote(commitment[0]))],
+        evidence: [sourceToCitation(source, shortQuote(commitment))],
       };
     }
   }
 
   if (source.direction === SourceDocumentDirection.INBOUND && days >= 2) {
-    const commitment = /\b(?:i['’]ll|i will|we['’]ll|we will)\s+([^.!?\n]{5,220})/iu.exec(
-      source.body,
-    );
-    if (commitment !== null && latest?.id === source.id && !automatedSender(source)) {
+    const commitment = derivedSignals(source).commitment;
+    if (typeof commitment === 'string' && latest?.id === source.id && !automatedSender(source)) {
       const person = (source.sender ?? 'Someone').replace(/<[^>]+>/u, '').trim() || 'Someone';
       return {
         kind: LifeItemKind.NUDGE,
         stableKey: `their-commitment:${source.id}`,
         title: `${person} said they would follow up`,
-        detail: `They wrote: “${shortQuote(commitment[0])}” No later message appears in this thread.`,
+        detail: `They wrote: “${shortQuote(commitment)}” No later message appears in this thread.`,
         confidence: 0.86,
-        evidence: [sourceToCitation(source, shortQuote(commitment[0]))],
+        evidence: [sourceToCitation(source, shortQuote(commitment))],
       };
     }
   }
 
-  const dateMention =
-    /\b(?:due|deadline|by|on|before)\s+((?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{1,2}(?:,?\s+\d{4})?|today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/iu.exec(
-      `${source.title}\n${source.body}`,
-    );
-  if (source.direction === SourceDocumentDirection.INBOUND && dateMention !== null) {
+  const dateMention = derivedSignals(source).dateMention;
+  if (source.direction === SourceDocumentDirection.INBOUND && typeof dateMention === 'string') {
     return {
       kind: LifeItemKind.CATCH,
       stableKey: `date-mentioned:${source.id}`,
-      title: `Date mentioned: ${dateMention[1] ?? 'review message'}`,
-      detail: `This email mentions “${shortQuote(dateMention[0])}.” Open the original before treating it as a deadline.`,
+      title: `Date mentioned: ${dateMention}`,
+      detail: `This email mentions “${shortQuote(dateMention)}.” Open the original before treating it as a deadline.`,
       confidence: 0.76,
-      evidence: [sourceToCitation(source, shortQuote(source.body))],
+      evidence: [sourceToCitation(source, shortQuote(dateMention))],
     };
   }
 
-  const renewal = /\b(?:subscription|renewal|renews?|membership|trial ends?)\b/iu.exec(
-    `${source.title}\n${source.body}`,
-  );
-  if (source.direction === SourceDocumentDirection.INBOUND && renewal !== null) {
+  const renewal = derivedSignals(source).renewal;
+  if (source.direction === SourceDocumentDirection.INBOUND && typeof renewal === 'string') {
     return {
       kind: LifeItemKind.CATCH,
       stableKey: `renewal:${source.id}`,
       title: `Renewal mentioned: ${source.title}`,
-      detail: `This message mentions “${shortQuote(renewal[0])}.” Review it before acting.`,
+      detail: `This message mentions “${shortQuote(renewal)}.” Review it before acting.`,
       confidence: 0.82,
-      evidence: [sourceToCitation(source, shortQuote(source.body))],
+      evidence: [sourceToCitation(source, shortQuote(renewal))],
     };
   }
   return null;
@@ -204,27 +202,23 @@ const draftFor = async (
   services: Services,
   userId: string,
   source: SourceDocumentView,
-  sourceDocuments: readonly SourceDocumentView[],
+  requestId?: string,
 ): Promise<string | null> => {
-  if (services.config.LLM_DEFAULT_PROVIDER === 'stub') return null;
-  const examples = sourceDocuments
-    .filter((entry) => entry.direction === SourceDocumentDirection.OUTBOUND)
-    .slice(0, 3)
-    .map((entry) => entry.body.slice(0, 800))
-    .join('\n---\n');
+  if (!messageNeedsReply(source)) return null;
   try {
     const completion = await services.llm.complete({
       task: 'draft',
       userId,
+      ...(requestId === undefined ? {} : { requestId }),
       messages: [
         {
           role: 'system',
           content:
-            'Write a concise reply in the style suggested by the supplied sent-email excerpts. Use only facts in the incoming email. Do not promise a date, action, attachment, or outcome that is not in the evidence. Return only the draft body.',
+            'Write a short acknowledgement using only the sender label and subject. The message body is intentionally unavailable. Do not claim to understand details and do not promise a date, action, attachment, or outcome. Return only the draft body.',
         },
         {
           role: 'user',
-          content: `Sent-email style excerpts:\n${examples || '(none)'}\n\nIncoming email:\nFrom: ${source.sender ?? 'unknown'}\nSubject: ${source.title}\nBody:\n${source.body.slice(0, 5_000)}`,
+          content: `From: ${source.sender ?? 'unknown'}\nSubject: ${source.title}\nThe original body is not retained.`,
         },
       ],
       constraints: { maxOutputTokens: 260, temperature: 0.2 },
@@ -236,7 +230,11 @@ const draftFor = async (
   }
 };
 
-export const refreshLifeItems = async (services: Services, userId: string): Promise<number> => {
+export const refreshLifeItems = async (
+  services: Services,
+  userId: string,
+  requestId?: string,
+): Promise<number> => {
   const sources = (await services.db.sourceDocument.findMany({
     where: { userId, deletedAt: null },
     orderBy: { occurredAt: 'desc' },
@@ -276,7 +274,7 @@ export const refreshLifeItems = async (services: Services, userId: string): Prom
     const draft =
       item.draftForSource === undefined
         ? null
-        : await draftFor(services, userId, item.draftForSource, sources);
+        : await draftFor(services, userId, item.draftForSource, requestId);
     await services.db.lifeItem.upsert({
       where: { userId_stableKey: { userId, stableKey: item.stableKey } },
       update: {
@@ -314,6 +312,7 @@ export const lifeItemDto = (item: {
   dueAt: Date | null;
   snoozedUntil: Date | null;
   draft: string | null;
+  copiedAt: Date | null;
   createdAt: Date;
 }): Record<string, unknown> => ({
   id: item.id,
@@ -326,11 +325,12 @@ export const lifeItemDto = (item: {
   dueAt: item.dueAt?.toISOString() ?? null,
   snoozedUntil: item.snoozedUntil?.toISOString() ?? null,
   draft: item.draft,
+  copiedAt: item.copiedAt?.toISOString() ?? null,
   createdAt: item.createdAt.toISOString(),
 });
 
 const searchable = (source: SourceDocumentView): string =>
-  [source.title, source.sender, source.recipients, source.body]
+  [source.title, source.sender, source.recipients, JSON.stringify(source.metadata)]
     .filter(Boolean)
     .join(' ')
     .toLowerCase();
@@ -360,8 +360,8 @@ const termsFor = (question: string): readonly string[] =>
     );
 
 const citationAnswer = (source: SourceDocumentView, lead: string): Record<string, unknown> => ({
-  answer: `${lead} ${source.title}. ${shortQuote(source.body)}`.trim(),
-  sources: [sourceToCitation(source, shortQuote(source.body))],
+  answer: `${lead} ${source.title}. Open the cited source for the original details.`.trim(),
+  sources: [sourceToCitation(source, 'Source metadata matched; the message body is not retained.')],
   confidence: 0.84,
 });
 
@@ -427,27 +427,6 @@ export const answerLifeQuestion = async (
       sources: [],
       confidence: 0,
     };
-  }
-  if (/how much|spent|spend/u.test(lower) && lower.includes('amazon')) {
-    const receipts = ranked
-      .filter((entry) => searchable(entry.source).includes('amazon'))
-      .slice(0, 20)
-      .map((entry) => entry.source);
-    const amounts = receipts.flatMap((source) =>
-      [...source.body.matchAll(/(?:\$|USD\s?)(\d{1,5}(?:\.\d{2})?)/giu)].map((match) =>
-        Number(match[1]),
-      ),
-    );
-    if (amounts.length > 0) {
-      const total = amounts.reduce((sum, amount) => sum + amount, 0);
-      return {
-        answer: `I found ${String(amounts.length)} dollar amounts in Amazon-related messages, totaling $${total.toFixed(2)}. This is only the receipts in your connected mail, not a bank statement.`,
-        sources: receipts
-          .slice(0, 8)
-          .map((source) => sourceToCitation(source, shortQuote(source.body))),
-        confidence: 0.76,
-      };
-    }
   }
   const lead = lower.includes('when did i last email')
     ? `The newest matching sent email was ${first.occurredAt?.toLocaleDateString() ?? 'at an unknown time'}:`

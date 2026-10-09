@@ -1,4 +1,4 @@
-import { RevealDecision, queuePush, type IntentKind } from '@orbit/db';
+import { RevealDecision, RunStatus, queuePush, type IntentKind } from '@orbit/db';
 import {
   introductionDecisionSchema,
   introductionOutcomeSchema,
@@ -88,6 +88,38 @@ const introductionInclude = {
 } as const;
 
 export const registerSocialRoutes = (app: FastifyInstance, services: Services): void => {
+  app.get('/v1/matching/status', async (request) => {
+    const auth = await requireAuth(request, services.config);
+    const [activeIntentCount, availablePeople, lastRun] = await Promise.all([
+      services.db.intent.count({
+        where: { userId: auth.id, active: true, deletedAt: null },
+      }),
+      services.db.user.count({
+        where: {
+          id: { not: auth.id },
+          status: 'ACTIVE',
+          deletedAt: null,
+          agent: { is: { deletedAt: null, onboardingCompletedAt: { not: null } } },
+          intents: { some: { active: true, deletedAt: null } },
+        },
+      }),
+      services.db.run.findFirst({
+        where: { userId: auth.id, kind: { in: ['nightly_rerank', 'nightly_introduction'] } },
+        orderBy: { createdAt: 'desc' },
+        select: { status: true, createdAt: true },
+      }),
+    ]);
+    return {
+      activeIntentCount,
+      availablePeople,
+      runsOvernight: true,
+      lastRunAt: lastRun?.createdAt.toISOString() ?? null,
+      lastRunStatus: lastRun?.status.toLowerCase() ?? null,
+      costCapPaused: lastRun?.status === RunStatus.PAUSED_COST_CAP,
+      providerFailed: lastRun?.status === RunStatus.FAILED,
+    };
+  });
+
   app.get('/v1/introductions', async (request) => {
     const auth = await requireAuth(request, services.config);
     const records = await services.db.introduction.findMany({

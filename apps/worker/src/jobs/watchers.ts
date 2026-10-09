@@ -391,6 +391,7 @@ const evaluateWithModel = async (
   query: string,
   sourceUrl: string,
   body: string,
+  requestId?: string,
 ): Promise<Candidate | null> => {
   if (router === undefined) return null;
   try {
@@ -409,6 +410,7 @@ const evaluateWithModel = async (
         },
       ],
       constraints: { maxOutputTokens: 300, temperature: 0, jsonMode: true },
+      ...(requestId === undefined ? {} : { requestId }),
     });
     const parsed = asRecord(JSON.parse(response.text));
     if (
@@ -434,6 +436,7 @@ const webCandidates = async (
   spec: ReturnType<typeof watcherSpecSchema.parse>,
   router: ModelRouter | undefined,
   searchConfig?: SearchApiConfig,
+  requestId?: string,
 ): Promise<{ candidates: Candidate[]; sourceUrl: string }> => {
   if (spec.format === 'search_api' && spec.url === undefined) {
     if (searchConfig?.SEARCH_API_KEY === undefined) {
@@ -500,6 +503,7 @@ const webCandidates = async (
     spec.query,
     fetched.url.toString(),
     fetched.body,
+    requestId,
   );
   return { candidates: fallback === null ? [] : [fallback], sourceUrl: fetched.url.toString() };
 };
@@ -579,6 +583,7 @@ export const runWatchers = async (
   db: PrismaClient,
   router?: ModelRouter,
   searchConfig?: SearchApiConfig,
+  requestId?: string,
 ): Promise<{ hits: number; proposals: number }> => {
   const proposals = await matchExchange(db);
   const due = await db.watcher.findMany({
@@ -645,7 +650,13 @@ export const runWatchers = async (
           hits += 1;
         }
       } else if (parsed.data.source === 'web') {
-        const result = await webCandidates(watcher.userId, parsed.data, router, searchConfig);
+        const result = await webCandidates(
+          watcher.userId,
+          parsed.data,
+          router,
+          searchConfig,
+          requestId,
+        );
         for (const candidate of result.candidates) {
           const key = watcherDedupeKey(watcher.id, candidate.stableId);
           const existing = await db.watcherHit.findUnique({
@@ -698,6 +709,7 @@ export const runWatchers = async (
           targetType: 'Watcher',
           targetId: watcher.id,
           payload: { source: parsed.data.source, status: 'ok' },
+          ...(requestId === undefined ? {} : { requestId }),
         },
       });
     } catch (error: unknown) {
@@ -714,8 +726,9 @@ export const runWatchers = async (
           targetId: watcher.id,
           payload: {
             source: parsed.data.source,
-            error: error instanceof Error ? error.message.slice(0, 500) : 'Unknown watcher error',
+            errorType: error instanceof Error ? error.name : 'UnknownError',
           },
+          ...(requestId === undefined ? {} : { requestId }),
         },
       });
     }

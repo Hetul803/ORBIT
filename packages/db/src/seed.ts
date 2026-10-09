@@ -21,11 +21,11 @@ import {
 } from './generated/prisma/enums.js';
 
 const allowSeed =
-  process.env.ALLOW_DEVELOPMENT_SEED === 'true' || process.env.NODE_ENV !== 'production';
+  process.env.NODE_ENV !== 'production' && process.env.ALLOW_DEVELOPMENT_SEED === 'true';
 
 if (!allowSeed) {
   throw new Error(
-    'Development seed is disabled outside development. Set ALLOW_DEVELOPMENT_SEED=true.',
+    'Development seed requires ALLOW_DEVELOPMENT_SEED=true and refuses NODE_ENV=production.',
   );
 }
 
@@ -130,6 +130,7 @@ const run = async (): Promise<void> => {
       where: { userId: user.id },
       update: {
         profileSummary: profile.join('. '),
+        onboardingCompletedAt: new Date(),
       },
       create: {
         id: agentId,
@@ -150,6 +151,7 @@ const run = async (): Promise<void> => {
           private_analysis: 'just_handle_it',
         },
         profileSummary: profile.join('. '),
+        onboardingCompletedAt: new Date(),
       },
     });
 
@@ -574,19 +576,6 @@ const run = async (): Promise<void> => {
       },
     });
   }
-
-  await db.otpChallenge.upsert({
-    where: { id: 'seed-demo-otp' },
-    update: { expiresAt: new Date(Date.now() + 365 * 86_400_000), consumedAt: null },
-    create: {
-      id: 'seed-demo-otp',
-      userId: userA.id,
-      email: userA.email,
-      codeHash: hash('424242'),
-      purpose: 'sign_in',
-      expiresAt: new Date(Date.now() + 365 * 86_400_000),
-    },
-  });
 };
 
 run()

@@ -14,7 +14,7 @@
   "scripts": {
     "generate": "prisma generate",
     "build": "pnpm generate && tsc -p tsconfig.json",
-    "typecheck": "pnpm generate && tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src prisma.config.ts --max-warnings=0",
     "test": "vitest run --passWithNoTests",
     "test:coverage": "vitest run --coverage --passWithNoTests",

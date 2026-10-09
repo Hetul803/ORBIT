@@ -2,6 +2,7 @@ import { Prisma } from '@orbit/db';
 
 import { sha256 } from './crypto.js';
 import type { Services } from './services.js';
+import { PrismaCostLedger } from './ledger.js';
 
 const EMBEDDING_DIMENSIONS = 1536;
 const EMBEDDING_TIMEOUT_MS = 12_000;
@@ -44,6 +45,18 @@ export const createEmbedding = async (
     services.config.OPENROUTER_API_KEY.length > 0;
   const key = useOpenRouter ? services.config.OPENROUTER_API_KEY : services.config.OPENAI_API_KEY;
   if (key === undefined || key.length === 0) return null;
+  const ledger = new PrismaCostLedger(services.db);
+  const boundedText = text.slice(0, 24_000);
+  const projectedCostCents =
+    ((new TextEncoder().encode(boundedText).length + 128) *
+      services.config.EMBEDDING_INPUT_COST_CENTS_PER_MILLION_TOKENS) /
+    1_000_000;
+  const reservationId = await ledger.reserve(
+    context.userId,
+    projectedCostCents,
+    services.config.USER_DAILY_COST_CAP_CENTS,
+    services.config.GLOBAL_DAILY_COST_CAP_CENTS,
+  );
   const startedAt = Date.now();
   const response = await fetch(
     useOpenRouter
@@ -63,7 +76,7 @@ export const createEmbedding = async (
         model: useOpenRouter
           ? services.config.OPENROUTER_EMBEDDING_MODEL
           : services.config.OPENAI_EMBEDDING_MODEL,
-        input: text.slice(0, 24_000),
+        input: boundedText,
         encoding_format: 'float',
         ...(useOpenRouter ? { dimensions: EMBEDDING_DIMENSIONS } : {}),
       }),
@@ -89,9 +102,11 @@ export const createEmbedding = async (
         ? usage.total_tokens
         : 0;
   const costCents =
-    typeof usage?.cost === 'number' && Number.isFinite(usage.cost) ? usage.cost * 100 : 0;
-  await services.db.modelCall.create({
-    data: {
+    typeof usage?.cost === 'number' && Number.isFinite(usage.cost)
+      ? usage.cost * 100
+      : (tokensIn * services.config.EMBEDDING_INPUT_COST_CENTS_PER_MILLION_TOKENS) / 1_000_000;
+  await ledger.record(
+    {
       userId: context.userId,
       ...(context.runId === undefined ? {} : { runId: context.runId }),
       ...(context.requestId === undefined ? {} : { requestId: context.requestId }),
@@ -105,7 +120,8 @@ export const createEmbedding = async (
       costCents,
       latencyMs: Date.now() - startedAt,
     },
-  });
+    reservationId,
+  );
   return embedding;
 };
 

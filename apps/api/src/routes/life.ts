@@ -75,6 +75,27 @@ export const registerLifeRoutes = (app: FastifyInstance, services: Services): vo
     return { ok: true, until: until.toISOString() };
   });
 
+  app.post('/v1/life/catch/:id/copied', async (request) => {
+    const auth = await requireAuth(request, services.config);
+    const params = parseWith(idParamsSchema, request.params);
+    const result = await services.db.lifeItem.updateMany({
+      where: { id: params.id, userId: auth.id, deletedAt: null, draft: { not: null } },
+      data: { copiedAt: new Date() },
+    });
+    if (result.count === 0) {
+      throw new ApiError(404, 'LIFE_ITEM_DRAFT_NOT_FOUND', 'That draft is unavailable.');
+    }
+    await logActivity(services.db, {
+      userId: auth.id,
+      actorType: 'USER',
+      action: 'life_item.draft_copied',
+      targetType: 'LifeItem',
+      targetId: params.id,
+      requestId: request.id,
+    });
+    return { ok: true, copiedAt: new Date().toISOString() };
+  });
+
   app.post('/v1/life/ask', async (request) => {
     const auth = await requireAuth(request, services.config);
     const body = parseWith(askSchema, request.body);
