@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import {
   mergeProviderCredentials,
   persistProviderCredentials,
+  rotateResendSendingKey,
   validateProviderCredentials,
 } from './configure-provider-credentials.mjs';
 
@@ -87,6 +88,54 @@ test('refuses symlink destinations and leaves local environment intact', async (
     await symlink(rootPath, providerPath);
     await assert.rejects(persistProviderCredentials(sentry, { rootPath, providerPath }));
     assert.equal(await readFile(rootPath, 'utf8'), 'NODE_ENV=development\n');
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('approved Resend rotation compares the old key and preserves all other providers', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'orbit-provider-rotation-'));
+  try {
+    const paths = {
+      rootPath: join(directory, '.env'),
+      providerPath: join(directory, '.env.providers.local'),
+    };
+    const oldKey = `re_${'oldsynthetic'.repeat(3)}`;
+    const newKey = `re_${'newsynthetic'.repeat(3)}`;
+    const original = `GOOGLE_OAUTH_CLIENT_SECRET=untouched\nRESEND_API_KEY="${oldKey}"\nSENTRY_AUTH_TOKEN=untouched\n`;
+    for (const path of Object.values(paths)) await writeFile(path, original);
+    assert.deepEqual(await rotateResendSendingKey(newKey, oldKey, paths), {
+      rotated: true,
+      files: 2,
+      permissions: '0600',
+    });
+    await rotateResendSendingKey(newKey, oldKey, paths);
+    for (const path of Object.values(paths)) {
+      assert.equal(await readFile(path, 'utf8'), original.replace(oldKey, newKey));
+      assert.equal((await stat(path)).mode & 0o777, 0o600);
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('Resend rotation refuses mismatched or duplicate keys without changing either file', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'orbit-provider-rotation-guard-'));
+  try {
+    const paths = {
+      rootPath: join(directory, '.env'),
+      providerPath: join(directory, '.env.providers.local'),
+    };
+    const oldKey = `re_${'oldsynthetic'.repeat(3)}`;
+    const newKey = `re_${'newsynthetic'.repeat(3)}`;
+    const original = `RESEND_API_KEY="${oldKey}"\n`;
+    for (const path of Object.values(paths)) await writeFile(path, original);
+    await assert.rejects(rotateResendSendingKey(newKey, `re_${'different'.repeat(4)}`, paths));
+    await assert.rejects(rotateResendSendingKey('malformed', oldKey, paths));
+    for (const path of Object.values(paths)) assert.equal(await readFile(path, 'utf8'), original);
+    await writeFile(paths.providerPath, original.repeat(2));
+    await assert.rejects(rotateResendSendingKey(newKey, oldKey, paths));
+    assert.equal(await readFile(paths.rootPath, 'utf8'), original);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

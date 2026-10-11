@@ -134,3 +134,25 @@ export async function persistProviderCredentials(values, paths = {}) {
   await replacePrivate(rootPath, originalRoot, nextRoot);
   return { stored: true, files: 2, permissions: '0600' };
 }
+
+/** Explicitly approved Resend-only rotation; compare the previous key before replacing it. */
+export async function rotateResendSendingKey(nextKey, expectedCurrentKey, paths = {}) {
+  const sender = 'ORBIT <hello@notify.orbitapp.world>';
+  for (const key of [nextKey, expectedCurrentKey])
+    validateProviderCredentials({ RESEND_API_KEY: key, RESEND_FROM_EMAIL: sender });
+  if (nextKey === expectedCurrentKey) throw new Error('Rotation requires a different key.');
+  const targets = [paths.providerPath ?? providerEnv, paths.rootPath ?? rootEnv];
+  const originals = await Promise.all(targets.map((path) => readRegular(path)));
+  const replacements = originals.map((original) => {
+    const matches = assignments(original, 'RESEND_API_KEY');
+    if (matches.length !== 1) throw new Error('Rotation requires one existing Resend key.');
+    const current = unquote(matches[0].slice('RESEND_API_KEY='.length));
+    // A partial two-file update can be retried with the same explicitly expected old/new pair.
+    if (![expectedCurrentKey, nextKey].includes(current))
+      throw new Error('Resend key changed; rotation requires review.');
+    return original.replace(matches[0], `RESEND_API_KEY=${JSON.stringify(nextKey)}`);
+  });
+  for (let index = 0; index < targets.length; index += 1)
+    await replacePrivate(targets[index], originals[index], replacements[index]);
+  return { rotated: true, files: 2, permissions: '0600' };
+}
