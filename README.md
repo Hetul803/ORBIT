@@ -1,5 +1,7 @@
 # ORBIT
 
+October 11 public-alpha addendum: [current verification and launch blockers](docs/PUBLIC_ALPHA_VERIFICATION.md), [moderation response commitment](docs/MODERATION_RUNBOOK.md), and [orbitapp.world / Namecheap DNS](docs/DOMAIN_SETUP.md). [Public landing page](https://orbit-alpha-launch.funapple4.chatgpt.site). Actual TestFlight/APK links and a deployed backend are not yet delivered; production admissions stay closed by default. The hard account ceiling is 100, including staff and suspended/pending-deletion accounts.
+
 ORBIT is a private agent network: each person owns a persistent representative that learns from explicit answers and corrections, finds useful people and opportunities, and asks before anything leaves the user's private space. The defensible core is an ORVIN-inspired, user-owned graph of versioned memories, skills, validation evidence, outcome feedback, lineage, and receipts—not a feed or a generic chat wrapper.
 
 This repository contains an Expo iOS/Android/web app, a Fastify API, PostgreSQL with pgvector, Redis/BullMQ workers, a provider-independent LLM router, public-web watchers, read-only Gmail OAuth, Expo push delivery, production email/SMS OTP adapters, export verification, and private-staging deployment assets.

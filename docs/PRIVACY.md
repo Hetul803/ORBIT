@@ -1,6 +1,6 @@
 # ORBIT Privacy Policy
 
-Effective: October 9, 2026
+Effective: October 11, 2026
 
 ORBIT is a private companion that helps a person remember commitments, review their own life, and discover introductions through a user-controlled agent. This policy describes the current limited beta identified by bundle/package ID `com.orbit.companion`.
 
@@ -37,7 +37,15 @@ ORBIT sends only the prompt context needed for a requested agent task to the con
 
 ## Introductions and other people
 
-Agent-to-agent conversations use bounded profile facts and apply a privacy redaction gate. An introduction remains private until both people separately choose to reveal. Either person can decline, block, or report. Safety and audit records may be kept to enforce those choices.
+Agent-to-agent conversations use bounded profile facts and apply a privacy redaction gate. Contact fields remain private until both people separately choose to reveal. Either person can decline, block, or report. Reporting an attached conversation suppresses it for both participants before review and revokes its meeting-plan links. Authorized staff can inspect privacy-cleared text and report details; staff views/actions are audited. Resend receives operator addresses and a generic report reference; Expo receives operator device tokens and a generic alert, not participant identities or report text. Provider acceptance is not proof of inbox/device delivery or human acknowledgement.
+
+Blocks stop contact in both directions for the two accounts, with no expiry or user-facing unblock option. They cannot erase copied details or delivered notifications, prevent a different identity, or survive erasure as an unlimited cross-identity ban. Safety/audit records may be retained where necessary; actual retention and legal requirements need operator review.
+
+## Verified waitlist and reconnection measurement
+
+A verified-email user may explicitly join the waitlist when admission is full or paused. It stores the verified email and join time, creates no account/reservation, promises no invitation date and sends no automatic marketing or invitation. Remove an entry using its current verified session, or reverify the email and remove it. Account deletion does not automatically remove a separately opted-in waitlist entry.
+
+Google token expiry, a foreground reconnect prompt shown, reconnect start and reconnection success are distinct product events, not substitutes for ordinary retention.
 
 ## Why ORBIT uses information
 
@@ -63,4 +71,4 @@ Material changes will update the effective date and be shown before they apply w
 
 ## Contact a human
 
-Open a request through [ORBIT Support](https://github.com/Hetul803/ORBIT/issues). Do not include sign-in codes, private account data, or Gmail content in a public issue. A private support email and owned public domain must be added before public store submission; that unfinished item is tracked in the repository.
+Use [ORBIT private support](https://orbitapp.world/support/) or email `patelhetul803@gmail.com` for account and privacy matters. The founder supplied this contact; inbox receipt and moderation response staffing remain unverified, so public enrollment stays closed. Signed-in users can report through the Safety center. Never put account, report, sign-in code or Gmail data in public GitHub issues. These policy documents describe implemented behavior; independent legal review remains outstanding.

@@ -1,5 +1,7 @@
 # ORBIT state of build
 
+> Historical assessment below: October 4. It is not today's capability claim. Later changes and remaining gaps are documented in [Pass 5 verification](PASS5_VERIFICATION.md) and the October 11 [public-alpha report](PUBLIC_ALPHA_VERIFICATION.md). The no-on-screen-OTP, permanent blocking, hard 100-account cap, operator outbox, reconnect measurements and public landing changes supersede the corresponding older observations, without rewriting their historical evidence.
+
 Assessment date: 2026-10-04 (America/Chicago)  
 Code assessed: `main` at `087c1a9`  
 Decision: what, if anything, should be put in front of 25 students next week

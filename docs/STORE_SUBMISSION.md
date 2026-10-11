@@ -1,28 +1,26 @@
 # ORBIT store-submission packet
 
-Prepared October 9, 2026. This packet is for later submission; Pass 5 did not submit either store.
+Prepared October 9, 2026; contact/owned-domain status updated October 11. This packet is for later submission; neither store has been submitted.
 
 ## Product identity
 
-| Field                                             | Value                                                                                                       |
-| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| App name                                          | **ORBIT**                                                                                                   |
-| iOS bundle ID / Android package                   | `com.orbit.companion`                                                                                       |
-| Version                                           | `0.1.0`                                                                                                     |
-| Initial iOS build / Android version code          | `1` / `1`; EAS production uses remote auto-increment after the first build                                  |
-| Primary category                                  | Lifestyle                                                                                                   |
-| Secondary category                                | Productivity                                                                                                |
-| Minimum audience                                  | 18+                                                                                                         |
-| Copyright                                         | `2026 ORBIT`                                                                                                |
-| Privacy URL available now                         | `https://github.com/Hetul803/ORBIT/blob/main/docs/PRIVACY.md`                                               |
-| Terms URL available now                           | `https://github.com/Hetul803/ORBIT/blob/main/docs/TERMS.md`                                                 |
-| Preferred hosted privacy URL after Railway deploy | `https://<API_DOMAIN>/privacy`                                                                              |
-| Preferred hosted terms URL after Railway deploy   | `https://<API_DOMAIN>/terms`                                                                                |
-| Interim support URL                               | `https://github.com/Hetul803/ORBIT/issues`                                                                  |
-| Preferred hosted support URL                      | `https://<API_DOMAIN>/support`                                                                              |
-| Contact email                                     | **BLOCKED: create a private mailbox on the owned sending domain and replace this field before submission.** |
+| Field                                    | Value                                                                                                         |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| App name                                 | **ORBIT**                                                                                                     |
+| iOS bundle ID / Android package          | `com.orbit.companion`                                                                                         |
+| Version                                  | `0.1.0`                                                                                                       |
+| Initial iOS build / Android version code | `1` / `1`; EAS production uses remote auto-increment after the first build                                    |
+| Primary category                         | Lifestyle                                                                                                     |
+| Secondary category                       | Productivity                                                                                                  |
+| Minimum audience                         | 18+                                                                                                           |
+| Copyright                                | `2026 ORBIT`                                                                                                  |
+| Privacy URL available now                | `https://orbitapp.world/privacy/`                                                                             |
+| Terms URL available now                  | `https://orbitapp.world/terms/`                                                                               |
+| Homepage                                 | `https://orbitapp.world/`                                                                                     |
+| Support URL                              | `https://orbitapp.world/support/`                                                                             |
+| Contact email                            | `patelhetul803@gmail.com`; founder-approved public support contact; receipt/monitoring drill remains required |
 
-The GitHub legal URLs become public as soon as this commit reaches the public `main` branch. The API also serves the same disclosures at `/privacy`, `/terms`, and `/support`, but those URLs are not public until Railway is deployed. A public issue must never contain a sign-in code, Gmail content, or other private data.
+These owned-domain static pages returned HTTPS 200 on October 11; they do not depend on the undeployed Railway API. Domain email is optional branding, not a Google consent prerequisite. A support inbox does not replace a verified transactional sender/Resend key, operator coverage or a private reviewer account. A public issue must never contain a sign-in code, Gmail content or other private data.
 
 ## Listing copy
 
@@ -68,7 +66,7 @@ ORBIT is for adults 18 and older. Model output can be wrong; verify important fa
 
 ### Beta feedback email
 
-**BLOCKED: use the private support mailbox created on the owned domain.**
+`patelhetul803@gmail.com` is approved for public support. Verify receipt and active monitoring before submission; do not publish the private developer contact by assumption.
 
 ## Screenshots and graphics
 
@@ -184,9 +182,9 @@ Do not add a static OTP, bypass, or hardcoded reviewer account. Before review:
 
 1. Google OAuth is unverified. Testing mode is capped at 100 listed test users and their grants expire after seven days; people see an unverified-app warning.
 2. Railway, Resend, Sentry, EAS, and Apple are not configured from this machine. A store reviewer cannot sign in until a verified Resend sender and reachable backend exist.
-3. There is no private support mailbox or owned public support/legal domain in the supplied configuration.
+3. Owned support/legal pages and the approved public contact now exist, but real mailbox receipt/monitoring, operator staffing and a secure reviewer mailbox/access path are not yet proven.
 4. Google Play requires an external web account-deletion request flow; only the in-app flow is complete.
 5. Current store-sized screenshots are derived from real light-mode web captures, not the final signed native build. Replace them after device validation.
 6. Sentry source-map upload is configured but not proven by a release event.
 7. Real Gmail/Calendar sync, deep-link return, two-device reveal, push, airplane-mode behavior, API-kill behavior, and signed export remain unverified on deployed physical devices.
-8. The 50-account default protects budget but will stop signups before a wider release unless the founder intentionally raises it with cost monitoring.
+8. The October 11 public alpha has a hard server ceiling of 100 non-deleted accounts, including staff, suspended and pending-deletion accounts. It cannot be raised above 100 by environment configuration. Full/paused new users receive an honest verified-email waitlist, not a fabricated account. Public TestFlight and direct APK links must be hosted on `orbitapp.world`; see `docs/LAUNCH_CHECKLIST.md` and `docs/DOMAIN_SETUP.md`.

@@ -1,6 +1,6 @@
 # ORBIT Terms of Service
 
-Effective: October 9, 2026
+Effective: October 11, 2026
 
 These terms govern the current ORBIT limited beta, bundle/package ID `com.orbit.companion`. By creating an account or using ORBIT, you agree to them.
 
@@ -40,6 +40,8 @@ Do not submit another person's confidential information without a lawful basis a
 
 ## Beta availability and changes
 
+The public alpha admits at most 100 non-deleted accounts server-side, including staff, suspended and pending-deletion accounts. New admissions can pause for safety coverage, overdue reports or alert faults. A waitlist entry creates no account or reservation and promises no invitation date. Google access remains limited to named test users until verification is complete. A block is bidirectional with no expiry/unblock option for the two accounts; closing a report does not restore its conversation. ORBIT cannot recall copied information or stop every alternate identity.
+
 This is a limited beta. Features, providers, limits, and availability can change or pause. Google testing credentials may expire and require reconnection. ORBIT may update these terms for legal, security, or product changes. Continued use after an effective update constitutes acceptance where permitted by law.
 
 ## Exports and deletion
@@ -52,4 +54,4 @@ ORBIT is provided on an “as available” basis during beta, to the extent allo
 
 ## Contact
 
-Open a request through [ORBIT Support](https://github.com/Hetul803/ORBIT/issues). Do not include sign-in codes, private account data, or Gmail content in a public issue. A private support email and owned public domain must be added before public store submission.
+Use [ORBIT private support](https://orbitapp.world/support/) or email `patelhetul803@gmail.com`. The supplied contact is not proof of staffed response coverage; public enrollment stays closed until operational checks pass. Never post account, report, sign-in code or Gmail content in public issues. Signed-in safety reports use the Safety center. These terms remain a draft pending independent legal review.

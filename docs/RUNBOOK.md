@@ -1,5 +1,17 @@
 # Operations runbook
 
+October 11 public-alpha operations: use [MODERATION_RUNBOOK.md](MODERATION_RUNBOOK.md) for the stranger-inclusive coverage/alert drill and [DOMAIN_SETUP.md](DOMAIN_SETUP.md) for the saved Namecheap records. The landing source is published, not the API. A new private Railway ORBIT project (`2adb816f-2c53-4bed-bfe8-f77de16a56a3`) contains staged API/worker service shells; applying the staged deployment was not approved. No PostgreSQL/Redis/source/secrets deployment has been completed there.
+
+The compiled local processes can be started from the repository root with Node 22.13+:
+
+```sh
+node --env-file=.env apps/api/dist/src/server.js
+GLOBAL_DAILY_COST_CAP_CENTS=0 USER_DAILY_COST_CAP_CENTS=0 node --env-file=.env apps/worker/dist/src/index.js
+pnpm --filter @orbit/mobile exec expo start --web --port 8081
+```
+
+The worker command intentionally disables unattended paid model calls. API user-initiated calls retain the configured budgets. Local email authentication still needs real Resend delivery; no UI sign-in bypass is supplied. Never enable development OTP display or seed on a shared/production deployment.
+
 ## Health
 
 - `GET /health` proves the API process is alive.
@@ -100,7 +112,23 @@ Model caps use atomic PostgreSQL budget reservations shared by API and worker, i
 
 The mobile flow is: ORBIT opens Google in the system browser → Google calls the HTTPS API callback → the API stores encrypted tokens → the API redirects to `orbit://connections?gmail=connected` → the app refreshes status and starts its first sync. ORBIT requests only `gmail.readonly` and `calendar.readonly`; it does not request send or calendar-write scopes.
 
-For Google OAuth testing mode, refresh tokens can expire after seven days. ORBIT marks an `invalid_grant` connection as expired and the Connections screen shows **Reconnect Google** rather than silently reporting a successful sync. Before adding anyone beyond approved test users, publish the OAuth consent screen, verify the company domain, and complete the required Google verification/security review for these restricted scopes.
+Google must use a newly created ORBIT-only Cloud project; set `GOOGLE_CLOUD_PROJECT_ID`, not a reused app project. Keep `GOOGLE_OAUTH_VERIFICATION_STATUS=testing` and align `GOOGLE_TEST_USER_EMAILS` with Google test accounts until verification is approved. Gmail read-only is restricted, and a stranger cohort is not the personally-known-users exemption. In testing, grants can expire: `invalid_grant` creates a distinct `google.token_expired` event, a foreground/focused screen records `google.reconnect_prompt_shown` once per expiry episode, and reconnect start/success are separate events. These are not ordinary retention counts. Finish the required verification/security process before general Google access.
+
+### Additional public-alpha variables
+
+| Variable                                                   | Service                     | Meaning                                                                                     |
+| ---------------------------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------- |
+| `DEPLOYMENT_ACCOUNT_CAP=100`                               | API                         | Hard ceiling 100; staff/suspended/pending deletion count. May be lower, never higher.       |
+| `PUBLIC_ALPHA_SIGNUPS_OPEN=false`                          | API                         | Closed until the operator completes the launch gate. Existing logins remain possible.       |
+| `MODERATION_COVERAGE_CONFIRMED=false`                      | API                         | Set true only after primary/backup coverage accepts the 15/60-minute commitment.            |
+| `MODERATION_OPERATOR_EMAILS`                               | API                         | Private operator mailbox list, each mapped to current staff/native devices.                 |
+| `SUPPORT_EMAIL`                                            | API + landing public config | A working monitored private support channel, not public GitHub issues.                      |
+| `RESEND_API_KEY`, `RESEND_FROM_EMAIL`                      | API + worker                | Both services need verified sender credentials for immediate and retried moderation emails. |
+| `EXPO_ACCESS_TOKEN`                                        | API + worker                | Server-only if enhanced Expo push security requires it; never `EXPO_PUBLIC_*`.              |
+| `MODERATION_TICK_CRON=*/5 * * * * *`                       | Worker                      | Durable operator-alert retry loop.                                                          |
+| `GOOGLE_CLOUD_PROJECT_ID`, verification status/tester list | API                         | New ORBIT project identity and honest Google eligibility gate.                              |
+
+Use one API instance for process-local live safety invalidation. Server database authorization/filtering remains the authority; offline/copied bytes cannot be recalled. See the moderation runbook for deadline/backlog admission failures and the actual provider/device drill.
 
 ## EAS, TestFlight, Android APK, updates, and Sentry
 

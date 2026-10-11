@@ -1,4 +1,6 @@
-# ORBIT limited-beta launch checklist
+# ORBIT public-alpha launch checklist
+
+Updated October 11, 2026: the founder expanded this cohort to include strangers, with a hard ceiling of 100 accounts. The historical dates below were missed; they are not evidence of distribution. Apply the [public-alpha verification](PUBLIC_ALPHA_VERIFICATION.md), [moderation runbook](MODERATION_RUNBOOK.md) and [orbitapp.world DNS handoff](DOMAIN_SETUP.md) before opening admission. The own-domain landing and legal/support pages are live over HTTPS; no TestFlight/APK links exist yet.
 
 Prepared Friday, October 9, 2026. Target: founder on iPhone by Saturday, October 10; about 25 invited people by Monday, October 12. This is TestFlight/APK distribution, not public store release.
 
@@ -8,8 +10,8 @@ Prepared Friday, October 9, 2026. Target: founder on iPhone by Saturday, October
 
 1. Put production secrets in a password manager. Run `pnpm secrets:generate` once locally to create ignored `.env.production.local`; copy values to Railway without printing or committing them. JWT access, JWT refresh, field encryption, and export signing values must all differ from development and from each other.
 2. Confirm `git check-ignore -v .env .env.production.local` names `.gitignore` before doing anything else.
-3. Have access to the GitHub repository, Railway, Resend, Google Cloud, Sentry, Expo, Apple Developer Program/App Store Connect, and an Android device. The current machine was authenticated only to GitHub during Pass 5.
-4. Choose the final API domain, e.g. `api.<owned-domain>`, and private support mailbox, e.g. `support@<owned-domain>`. Do not use an address until its mailbox works.
+3. Have access to GitHub, Railway, Resend, Google Cloud, Sentry, Expo, Apple Developer Program/App Store Connect, Namecheap, and real iOS/Android devices. Railway access became available October 11: a new private ORBIT project and two staged service shells exist, but applying the staged deployment was not approved. Do not reuse the unrelated projects or claim the API is deployed.
+4. The owned landing domain is `orbitapp.world`, registered at Namecheap; DNS/TLS and all four public pages are verified. Proposed API domain `api.orbitapp.world` needs its own Railway record after deployment. The approved public support address is configured locally and in the landing; prove real receipt and monitoring. Do not infer moderator staffing from a supplied support address.
 
 ## Gate 1 — verify Resend before inviting anyone
 
@@ -23,14 +25,16 @@ Prepared Friday, October 9, 2026. Target: founder on iPhone by Saturday, October
 
 ## Gate 2 — deploy Railway
 
+The founder declined the staged deployment. This sequence requires new approval before execution. Reuse existing ORBIT project `2adb816f-2c53-4bed-bfe8-f77de16a56a3` and staged API/worker services; do not create duplicate projects or service shells. The template/repository steps below describe provisioning/source work still needed, not actions already completed.
+
 1. Sign in to Railway. Click **New Project → Deploy a Template**, search for **pgvector**, and deploy a PostgreSQL template that includes the vector extension. Name the service `orbit-postgres`.
 2. In the project canvas click **New → Database → Add Redis**. Name it `orbit-redis`. Do not generate a public domain for either data service.
 3. Click **New → GitHub Repo**, select `Hetul803/ORBIT`, and name the service `orbit-api`. Open **Settings → Source** and keep Root Directory `/`. Open **Settings → Config as Code → Add File Path**, enter `/infra/railway/api.json`, and save.
 4. Open `orbit-api` **Settings → Networking → Public Networking → Generate Domain**. Record the HTTPS host. If using a custom host, click **Custom Domain**, enter it, add Railway's displayed DNS record, and wait for TLS.
 5. Add another **New → GitHub Repo** service from the same repository, name it `orbit-worker`, and set **Settings → Config as Code** to `/infra/railway/worker.json`. Do not add public networking.
 6. Open the project **Variables → Shared Variables → New Variable**. Add `NODE_ENV=production`, database and Redis reference variables, one fresh `FIELD_ENCRYPTION_KEY`, OpenRouter routing/cost variables, daily cost caps, and `SENTRY_DSN`. Use Railway's **Add Reference** picker for `DATABASE_URL` and `REDIS_URL`; do not paste public database credentials.
-7. In `orbit-api` **Variables**, add `PUBLIC_API_URL`, `ALLOWED_ORIGINS`, both JWT secrets, export secret, Resend values, `PHONE_OTP_PROVIDER=disabled`, Google values, `ORBIT_MOBILE_REDIRECT_URL=orbit://connections`, `DEPLOYMENT_ACCOUNT_CAP=50`, the OTP/account limits from `.env.example`, and `ADMIN_EMAILS`.
-8. In `orbit-worker` **Variables**, add the cron values from `.env.example`. Keep `ALLOW_DEVELOPMENT_SEED=false` and `ALLOW_DEVELOPMENT_OTP_DISPLAY=false` everywhere.
+7. In `orbit-api` **Variables**, add `PUBLIC_API_URL`, `ALLOWED_ORIGINS`, both JWT secrets, export secret, Resend values, `PHONE_OTP_PROVIDER=disabled`, Google values, `ORBIT_MOBILE_REDIRECT_URL=orbit://connections`, `DEPLOYMENT_ACCOUNT_CAP=100` (never higher), the OTP/account limits from `.env.example`, `ADMIN_EMAILS`, `SUPPORT_EMAIL`, and private `MODERATION_OPERATOR_EMAILS`. Initially keep `PUBLIC_ALPHA_SIGNUPS_OPEN=false` and `MODERATION_COVERAGE_CONFIRMED=false`.
+8. In `orbit-worker` **Variables**, add the cron values from `.env.example`, including `MODERATION_TICK_CRON=*/5 * * * * *`. API and worker both need Resend values and server-only `EXPO_ACCESS_TOKEN` if Expo requires it. Keep `ALLOW_DEVELOPMENT_SEED=false` and `ALLOW_DEVELOPMENT_OTP_DISPLAY=false` everywhere. Keep one API instance for the alpha's process-local live safety invalidation.
 9. Select `orbit-api` and click **Deploy**. The config runs `prisma migrate deploy` before starting and checks `/ready`. Open **Deployments → latest deployment → View Logs**. A missing required production variable must stop boot and name the variable; correct it in Railway, not source.
 10. When API status is **Active**, click its generated domain and verify `/health`, `/ready`, `/privacy`, `/terms`, and `/support`. From a phone on cellular—not the same Wi-Fi—open `https://<API_DOMAIN>/ready` and save the successful JSON screenshot as external-network evidence.
 11. Select `orbit-worker` and click **Deploy**. In **Deployments → View Logs**, confirm scheduler registration and no credential/body/email in a line.
@@ -39,14 +43,14 @@ Prepared Friday, October 9, 2026. Target: founder on iPhone by Saturday, October
 
 ## Gate 3 — configure Google Cloud
 
-1. Open Google Cloud Console, use the project picker, and click **New Project**. Name it `ORBIT Production`; click **Create**, then select it.
-2. Open **APIs & Services → Library**. Search **Gmail API**, open it, click **Enable**. Return to Library, search **Google Calendar API**, open it, click **Enable**.
-3. Open **Google Auth Platform → Branding → Get Started**. Enter app name `ORBIT`, the private support email, select **External**, enter the developer contact email, accept the policy acknowledgment, and click **Create**.
-4. In **Branding**, add the owned public homepage, `https://<API_DOMAIN>/privacy`, and `https://<API_DOMAIN>/terms`. Add the owned authorized domain. Save each section.
-5. Open **Google Auth Platform → Data Access → Add or Remove Scopes**. Add exactly Gmail API `.../auth/gmail.readonly` and Calendar API `.../auth/calendar.readonly`; click **Update**, then **Save**. Do not add send, modify, contacts, or calendar-write access.
+1. The founder created the separate **ORBIT** project `orbit-511108`; its identity and previously unconfigured Google Auth Platform were inspected October 11. Use this project, not an unrelated app's project or a duplicate. Privately retain project creation/ownership evidence; branding, verification state and testing allowances are per project.
+2. Gmail API and Google Calendar API are enabled in `orbit-511108`, verified in their service detail pages. No paid Google resources or billing were enabled.
+3. External/Testing consent configuration was created with founder-approved contacts and explicit approval of the required data policy. It is not production-verified.
+4. **Branding** already has homepage `https://orbitapp.world/`, privacy `https://orbitapp.world/privacy/`, terms `https://orbitapp.world/terms/`, authorized domain `orbitapp.world` and the approved support contact. All four public pages returned HTTPS 200. Support receipt/monitoring is still unproven. Google Search Console verification TXT records are separate from hosting TXT records; preserve both.
+5. **Google Auth Platform → Data Access** already has exactly Gmail API `.../auth/gmail.readonly` and Calendar API `.../auth/calendar.readonly` saved and verified. Do not add send, modify, contacts or calendar-write access. **ORBIT local founder alpha** already exists with only `http://localhost:4100/v1/connections/gmail/callback`, credentials in ignored local `.env`, and both supplied Google accounts in the persisted test-user table. No account has granted data access. Do not recreate that local client; the next step is a separate deployment client after the API exists.
 6. Open **Google Auth Platform → Clients → Create Client**. Choose **Web application**, name it `ORBIT Railway`, and under **Authorized redirect URIs** click **Add URI**. Enter exactly `https://<API_DOMAIN>/v1/connections/gmail/callback`. Click **Create**.
-7. Copy the client ID and secret into the `orbit-api` Railway variables. Set `GOOGLE_OAUTH_REDIRECT_URI` to the exact callback and `GMAIL_INTEGRATION_ENABLED=true`; redeploy the API.
-8. Open **Google Auth Platform → Audience**. Keep publishing status **Testing** for the beta. Under **Test users**, click **Add users**, enter the founder and each friend who will connect Google, then click **Save**. Testing allows at most 100 listed test users and their grants expire after seven days.
+7. Copy the new project's client ID and secret into `orbit-api` Railway variables. Also set `GOOGLE_CLOUD_PROJECT_ID`, `GOOGLE_OAUTH_REDIRECT_URI` to the exact callback, `GOOGLE_OAUTH_VERIFICATION_STATUS=testing`, `GOOGLE_TEST_USER_EMAILS` to permitted ORBIT account emails, and `GMAIL_INTEGRATION_ENABLED=true`; redeploy. Do not label the app verified before Google approves it.
+8. In **Google Auth Platform → Audience**, keep status **Testing** until necessary verification is complete. Add each permitted Google-account test email and align the ORBIT API allowlist. Unlisted ORBIT users are told Google access is pending verification; other features remain available. The ORBIT 100-account cap is independent of Google's testing limits. A public link and fewer than 100 strangers do not create a personal-use verification exemption. [Restricted-scope verification](https://developers.google.com/identity/protocols/oauth2/production-readiness/restricted-scope-verification).
 9. On the installed iPhone, open **You → Settings & model keys → Connections → Connect Google read-only**. Read the full consent screen, approve both scopes, return through `orbit://connections`, and confirm progress advances through mail, Calendar, and Catch. Cancel once and deny once before the successful test; confirm each message is distinct.
 10. To begin verification today, complete Branding with an owned, publicly accessible homepage that links Privacy; verify the domain in Search Console if prompted; keep Data Access limited to the two exact scopes; prepare a screen recording showing the English consent screen, OAuth client ID, complete grant, Gmail-derived Catch item, Calendar-derived item, source links, disconnect, and deletion; write a scope-by-scope necessity explanation; then open **Google Auth Platform → Verification Center** or the **Prepare for verification** action shown in Branding/Data Access. Review the summary, click **Submit for verification**, and answer Google's email requests. Plan for four to six weeks; that timing is an operating estimate, not a guarantee. Gmail read-only is a restricted scope; server-side handling may also require Google's security assessment process, not just sensitive-scope review.
 
@@ -83,21 +87,21 @@ Prepared Friday, October 9, 2026. Target: founder on iPhone by Saturday, October
 8. Internal testing does not require Beta App Review. Processing, compliance questions, signing, and account agreements can still block availability.
 9. On cellular, not Mac loopback, complete the ten-step deployed verification in `docs/PASS5_VERIFICATION.md`. Save screenshots of `/ready`, successful email receipt with the code obscured, Google connected/progress, Catch source open, two-sided reveal, deletion countdown/cancel, and export verification.
 
-## Sequence 2 — friends on iPhone by Monday
+## Sequence 2 — public TestFlight distribution, including strangers
 
-1. Do this Saturday. In App Store Connect open **Apps → ORBIT → TestFlight**. In the sidebar next to **External Testing**, click **+ → Create New Group**. Name it `ORBIT Friends`, enable automatic distribution if desired, then click **Create**.
+1. In App Store Connect open **Apps → ORBIT → TestFlight**. After an internal group exists, create an **External Testing** group named `ORBIT Alpha`. The first external build needs Beta App Review; a queued upload or internal invitation does not meet the public-link requirement. [Apple external-testing instructions](https://developer.apple.com/help/app-store-connect/test-a-beta-version/invite-external-testers/).
 2. Open the group and click **Add Builds**. Select the exact founder-tested build, click **Add**, and complete **Test Information**: beta description, features to test, private feedback email, review contact name/phone/email, and sign-in credentials.
 3. Use the real reviewer mailbox plan in `docs/STORE_SUBMISSION.md`. Put mailbox access/OTP instructions only in the private Beta App Review fields. Never add a fixed OTP or source-code bypass.
 4. Answer export compliance and content questions. Click **Submit for Review** for Beta App Review. The first external build requires review; submit Saturday rather than waiting for Monday.
-5. After status becomes **Approved**, open the external group and click **Enable Public Link**. Set a tester limit around 30, optionally set device/OS criteria, and click **Enable**.
-6. Copy the public link and send it only to the intended group. Each person installs TestFlight, opens the link, taps **Accept**, then **Install**.
-7. Add every Google-connecting friend under **Google Auth Platform → Audience → Test users** before they connect. Remind them that testing-mode access expires after seven days and the app will ask them to reconnect.
-8. Keep `DEPLOYMENT_ACCOUNT_CAP=50` for this cohort. Watch Railway health, worker failures, OTP limits, Sentry, `/v1/admin/costs`, and the global daily cap after invitations go out.
+5. After approval, enable the public link with suitable device/OS criteria and a controlled tester limit. The server independently caps all accounts at 100, including staff/suspended/pending deletion; TestFlight enrollment is not account admission.
+6. Verify the real `https://testflight.apple.com/join/...` link and installation. Put it in `apps/landing/release-config.json`, rebuild and republish the existing site. It must be reachable from `https://orbitapp.world/`, not only sent privately.
+7. Keep Google gated to permitted named testers while verification is pending. Do not tell strangers to bypass an unverified-app warning as a public-launch workaround.
+8. Complete the moderation delivery/staffing drill before opening signups. Watch health, outbox, response deadlines, provider limits, Sentry and daily costs. Admission automatically fails closed for absent readiness, stale unsent alerts and overdue acknowledgement/first action.
 
-## Sequence 3 — friends on Android by Monday
+## Sequence 3 — direct Android APK on the owned landing page
 
-1. In Expo Dashboard open **ORBIT → Builds → Android → preview build**. Open the successful build and click **Install** or copy the build's share URL/QR code.
-2. Send that exact Expo build link to the intended tester. Tell them: “This is ORBIT's private beta APK from our Expo build page, not Google Play. Android will warn because it is being installed outside Play.”
+1. Build/install the signed preview APK, verify package `com.orbit.companion`, API HTTPS/WSS environment, native deep links and push, and download the actual artifact. Compute its SHA-256 and publish the immutable `.apk` over public HTTPS on an approved artifact host. Do not use an expiring/private signed URL or a build-dashboard page as the direct download.
+2. Put its public URL and digest in `apps/landing/release-config.json`, rebuild and republish. Verify downloading from `https://orbitapp.world/` produces the same digest and installs the exact founder-tested artifact. It is not Google Play; disclose direct installation clearly.
 3. On Android, open the link, download the `.apk`, and tap the download. Chrome or Files may say **For your security, your phone currently isn't allowed to install unknown apps from this source**. Tap **Settings**, enable **Allow from this source** for the app that opened the file, go back, then tap **Install**.
 4. If Play Protect offers **Scan app**, let it scan. Do not tell people to disable Play Protect. If Android shows a different publisher, package, or source than the Expo ORBIT build page, stop.
 5. After installation, return to **Settings → Apps → Special app access → Install unknown apps**, open Chrome/Files, and turn **Allow from this source** off again.
