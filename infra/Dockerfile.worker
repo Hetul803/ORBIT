@@ -3,6 +3,7 @@ ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 RUN corepack enable
 WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates openssl && apt-get clean
 
 COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml turbo.json tsconfig.base.json ./
 COPY apps/worker/package.json apps/worker/package.json
