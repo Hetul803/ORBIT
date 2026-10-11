@@ -4,42 +4,40 @@ Updated October 11, 2026: the founder expanded this cohort to include strangers,
 
 Prepared Friday, October 9, 2026. Target: founder on iPhone by Saturday, October 10; about 25 invited people by Monday, October 12. This is TestFlight/APK distribution, not public store release.
 
-> **Monday blocker: verify a sending domain in Resend.** Until `RESEND_FROM_EMAIL` uses a verified domain and Railway has the matching `RESEND_API_KEY`, real OTP email is not proven. The app deliberately refuses production log mode and never shows a code on screen. Google test-user access is a second per-person requirement for anyone connecting Google.
+> **Current blockers:** signed phone builds/installation, separate production Google setup, real deployed/device verification and staffed safety response. Resend sending domain/key are now verified and installed; local founder OTP arrived and onboarding was confirmed. Deployed non-founder OTP and actual report email/native push still need proof. Public signups remain closed. No code is shown on screen.
 
 ## Gate 0 — accounts and values to prepare
 
 1. Put production secrets in a password manager. Run `pnpm secrets:generate` once locally to create ignored `.env.production.local`; copy values to Railway without printing or committing them. JWT access, JWT refresh, field encryption, and export signing values must all differ from development and from each other.
 2. Confirm `git check-ignore -v .env .env.production.local` names `.gitignore` before doing anything else.
-3. Have access to GitHub, Railway, Resend, Google Cloud, Sentry, Expo, Apple Developer Program/App Store Connect, Namecheap, and real iOS/Android devices. Railway access became available October 11: a new private ORBIT project and two staged service shells exist, but applying the staged deployment was not approved. Do not reuse the unrelated projects or claim the API is deployed.
+3. Have access to GitHub, Railway, Resend, Google Cloud, Sentry, Expo, Apple Developer Program/App Store Connect, Namecheap, and real iOS/Android devices. Railway deployment is complete under explicit dashboard-route approval: four online services in the separate ORBIT project. Reuse it; do not create duplicates. Founder reports paid Apple membership; existing Expo account is signed in.
 4. The owned landing domain is `orbitapp.world`, registered at Namecheap; DNS/TLS and all four public pages are verified. Proposed API domain `api.orbitapp.world` needs its own Railway record after deployment. The approved public support address is configured locally and in the landing; prove real receipt and monitoring. Do not infer moderator staffing from a supplied support address.
 
-## Gate 1 — verify Resend before inviting anyone
+## Gate 1 — verified Resend; finish deployed receipt drills
 
-1. Sign in to Resend and open **Domains → Add Domain**.
-2. Enter the owned sending domain or a sending subdomain such as `mail.<owned-domain>`; choose the region closest to Railway if offered; click **Add**.
-3. At the DNS host, create every SPF, DKIM, and return-path record Resend displays. Copy names and values exactly. Do not proxy mail records through a CDN.
-4. Return to Resend **Domains**, open the domain, and click **Verify DNS Records** until status is **Verified**.
-5. Open **API Keys → Create API Key**. Name it `ORBIT production`, limit it to sending if Resend offers permission scope, create it, and copy it once into Railway as `RESEND_API_KEY`.
-6. In Railway set `OTP_DELIVERY_MODE=resend` and `RESEND_FROM_EMAIL=ORBIT <sign-in@<verified-domain>>`.
-7. From the deployed app, request an OTP to the founder and to one non-founder mailbox. Confirm the newest six-digit code arrives, the From domain aligns, resend waits 30 seconds, and an earlier code cannot be used. Do not invite friends until both addresses pass.
+The sending domain **notify.orbitapp.world** is Verified, sending enabled and receiving disabled. The three approved DNS records are saved/resolved. A sending-only, domain-restricted replacement key is installed locally and in API/worker; old exposed key revoked. Do not create another domain/key or change root mail records.
 
-## Gate 2 — deploy Railway
+1. Open Resend **Domains → notify.orbitapp.world** and retain its Verified state.
+2. Keep Railway API/worker **Variables** set to real Resend delivery and the approved verified sender; never paste credentials into chat or a report.
+3. Local founder OTP is Delivered and human sign-in reached onboarding. From the **deployed** signed app request fresh OTPs to founder and a non-founder, verify receipt, 30-second resend, old-code rejection and honest quota failures.
+4. Separately run the real report drill against approved test accounts/devices: suppression before review, operator email **and** native push, acknowledgement/protective-action timestamps.
+5. Free quota is 100/day including OTPs and alerts. Do not invite users until alert headroom and staffing are established. Paid email reserve is not upgrade authority.
 
-The founder declined the staged deployment. This sequence requires new approval before execution. Reuse existing ORBIT project `2adb816f-2c53-4bed-bfe8-f77de16a56a3` and staged API/worker services; do not create duplicate projects or service shells. The template/repository steps below describe provisioning/source work still needed, not actions already completed.
+## Gate 2 — deployed Railway; finish operations proof
 
-1. Sign in to Railway. Click **New Project → Deploy a Template**, search for **pgvector**, and deploy a PostgreSQL template that includes the vector extension. Name the service `orbit-postgres`.
-2. In the project canvas click **New → Database → Add Redis**. Name it `orbit-redis`. Do not generate a public domain for either data service.
-3. Click **New → GitHub Repo**, select `Hetul803/ORBIT`, and name the service `orbit-api`. Open **Settings → Source** and keep Root Directory `/`. Open **Settings → Config as Code → Add File Path**, enter `/infra/railway/api.json`, and save.
-4. Open `orbit-api` **Settings → Networking → Public Networking → Generate Domain**. Record the HTTPS host. If using a custom host, click **Custom Domain**, enter it, add Railway's displayed DNS record, and wait for TLS.
-5. Add another **New → GitHub Repo** service from the same repository, name it `orbit-worker`, and set **Settings → Config as Code** to `/infra/railway/worker.json`. Do not add public networking.
-6. Open the project **Variables → Shared Variables → New Variable**. Add `NODE_ENV=production`, database and Redis reference variables, one fresh `FIELD_ENCRYPTION_KEY`, OpenRouter routing/cost variables, daily cost caps, and `SENTRY_DSN`. Use Railway's **Add Reference** picker for `DATABASE_URL` and `REDIS_URL`; do not paste public database credentials.
-7. In `orbit-api` **Variables**, add `PUBLIC_API_URL`, `ALLOWED_ORIGINS`, both JWT secrets, export secret, Resend values, `PHONE_OTP_PROVIDER=disabled`, Google values, `ORBIT_MOBILE_REDIRECT_URL=orbit://connections`, `DEPLOYMENT_ACCOUNT_CAP=100` (never higher), the OTP/account limits from `.env.example`, `ADMIN_EMAILS`, `SUPPORT_EMAIL`, and private `MODERATION_OPERATOR_EMAILS`. Initially keep `PUBLIC_ALPHA_SIGNUPS_OPEN=false` and `MODERATION_COVERAGE_CONFIRMED=false`.
-8. In `orbit-worker` **Variables**, add the cron values from `.env.example`, including `MODERATION_TICK_CRON=*/5 * * * * *`. API and worker both need Resend values and server-only `EXPO_ACCESS_TOKEN` if Expo requires it. Keep `ALLOW_DEVELOPMENT_SEED=false` and `ALLOW_DEVELOPMENT_OTP_DISPLAY=false` everywhere. Keep one API instance for the alpha's process-local live safety invalidation.
-9. Select `orbit-api` and click **Deploy**. The config runs `prisma migrate deploy` before starting and checks `/ready`. Open **Deployments → latest deployment → View Logs**. A missing required production variable must stop boot and name the variable; correct it in Railway, not source.
-10. When API status is **Active**, click its generated domain and verify `/health`, `/ready`, `/privacy`, `/terms`, and `/support`. From a phone on cellular—not the same Wi-Fi—open `https://<API_DOMAIN>/ready` and save the successful JSON screenshot as external-network evidence.
-11. Select `orbit-worker` and click **Deploy**. In **Deployments → View Logs**, confirm scheduler registration and no credential/body/email in a line.
-12. Never run `pnpm db:seed` against Railway. The seed script refuses production even if its development-only flag is explicitly set.
-13. Before accepting signups, verify client-IP handling. Fastify ignores forwarded headers by default. Set `TRUSTED_PROXY_CIDRS` only to verified immediate-ingress addresses/CIDRs, never `true`, `0.0.0.0/0`, or `::/0`. Confirm with Railway which trusted ingress peers and forwarding headers apply to the chosen domain. Test two networks for separate limits and a forged forwarding header for no bypass. Until this is proven, per-IP limits may group all users behind one ingress and reject the sixth signup. Do not relax the account cap to compensate. [Railway networking contract](https://docs.railway.com/networking/public-networking/specs-and-limits), [Fastify proxy trust](https://fastify.dev/docs/latest/Reference/Server/).
+Completed: dedicated project **2adb816f-2c53-4bed-bfe8-f77de16a56a3**, four online single-replica services, two private volumes, resource caps, fresh server secrets, source pinned to **92d8199**, sixteen migrations, server source-map uploads, public API HTTPS. [Readiness](https://orbit-api-production-807e.up.railway.app/ready) is HTTP 200. [Exact evidence/failure trail](PROVIDER_SETUP_VERIFICATION.md).
+
+1. Open the existing ORBIT project → **Architecture**. Keep API/worker/pgvector/Redis; do not provision replacements. Data services and worker remain private.
+2. Open API **Settings → Build**: Dockerfile path **infra/Dockerfile.api**, repository root. Worker uses **infra/Dockerfile.worker**. Config-as-code opt-in is unavailable for these new services; explicit settings are applied. Do not rely on old Add File Path instructions.
+3. API **Settings → Deploy**: pre-deploy **pnpm --filter @orbit/db migrate:deploy**, start **pnpm --filter @orbit/api start**, health **/ready**; **Variables** API_PORT/PORT **4100**. Worker start **pnpm --filter @orbit/worker start**. No seed.
+4. **Settings → Scaling**: one replica each; CPU .25 each; API/worker/Postgres 500,000,000-byte memory, Redis 250,000,000. No automatic increase without budget review.
+5. **Settings → Networking**: only API public, current generated host **orbit-api-production-807e.up.railway.app** target 4100. An owned API alias needs a separately approved DNS change. Preserve landing/mail records.
+6. **Variables**: private direct service references for database/Redis; service-specific private secrets/provider credentials. Keep signup/coverage false, production Gmail disabled until approved client exists, development seed/OTP off, phone disabled, worker modeled spend zero. Do not silently grant ADMIN.
+7. **Deployments → active deployment → View Logs**: retain migration/upload/listening/worker-ready evidence without publishing private payloads. Earlier failed deployments remain visible; current API warning still requires assessment.
+8. On an actual phone **with Wi-Fi off**, open public **/ready**. Save successful JSON as independent cellular evidence. The workstation curl is not that test.
+9. Finish private database backup restore, vector-extension/account-count SQL and runtime/migrator least privilege before inviting strangers.
+10. Verify ingress trust with Railway. Fastify ignores forwarding headers by default. Use only verified immediate peer CIDRs, never trust-all; test two networks and forged headers. Until proven, per-IP limits may aggregate ingress users. Do not relax account/cost caps.
+11. Billing hard limit affects every workspace workload, including unrelated apps. Obtain separate approval/isolation before applying it. [Budget](BUDGETED_DEPLOYMENT.md).
 
 ## Gate 3 — configure Google Cloud
 
@@ -54,24 +52,26 @@ The founder declined the staged deployment. This sequence requires new approval 
 9. On the installed iPhone, open **You → Settings & model keys → Connections → Connect Google read-only**. Read the full consent screen, approve both scopes, return through `orbit://connections`, and confirm progress advances through mail, Calendar, and Catch. Cancel once and deny once before the successful test; confirm each message is distinct.
 10. To begin verification today, complete Branding with an owned, publicly accessible homepage that links Privacy; verify the domain in Search Console if prompted; keep Data Access limited to the two exact scopes; prepare a screen recording showing the English consent screen, OAuth client ID, complete grant, Gmail-derived Catch item, Calendar-derived item, source links, disconnect, and deletion; write a scope-by-scope necessity explanation; then open **Google Auth Platform → Verification Center** or the **Prepare for verification** action shown in Branding/Data Access. Review the summary, click **Submit for verification**, and answer Google's email requests. Plan for four to six weeks; that timing is an operating estimate, not a guarantee. Gmail read-only is a restricted scope; server-side handling may also require Google's security assessment process, not just sensitive-scope review.
 
-## Gate 4 — Sentry release proof
+## Gate 4 — Sentry provider setup done; finish real-device proof
 
-1. In Sentry click **Projects → Create Project**. Create one **Node.js** project for `orbit-api`, one for `orbit-worker`, and one **React Native** project for `orbit-mobile`.
-2. Put server DSNs in the matching Railway services as `SENTRY_DSN`; set `SENTRY_ENVIRONMENT=production`.
-3. In Sentry open **Settings → Developer Settings → Internal Integrations → Create New Integration**. Create a CI release-upload token with only the needed project/release permissions. Put `SENTRY_ORG`, `SENTRY_PROJECT`, and `SENTRY_AUTH_TOKEN` in the EAS production environment; never use an `EXPO_PUBLIC_*` name for the token.
-4. Put only the mobile public DSN in EAS as `EXPO_PUBLIC_SENTRY_DSN`.
-5. After the build, trigger a controlled non-sensitive test error in each service, remove the trigger, and verify the Sentry event has readable source lines, environment, release, and request ID without email, token, prompt, or message body.
-6. In each Railway service add private `SENTRY_AUTH_TOKEN`, its own `SENTRY_PROJECT`, `SENTRY_ORG`, and a distinct `SENTRY_RELEASE` such as `orbit-api@<commit-sha>` or `orbit-worker@<commit-sha>`. The start scripts inject debug IDs and upload service/shared-package source maps before launching the Node process. Missing settings or a failed upload stop production startup. The CLI token is passed through environment only. Upload success and readable release events still need to be proved with the founder's Sentry account. [Sentry source-map guidance](https://docs.sentry.io/platforms/javascript/guides/hono/sourcemaps/troubleshooting_js).
+Three dedicated projects exist in **gsin-bb** on Developer Free. Server DSNs/private upload token are installed in Railway. Production API/worker source-map uploads succeeded; local compiled diagnostics show original source lines. Existing unrelated project and GitHub integration were not changed.
+
+1. Sentry **Settings → Projects → orbit-api / orbit-worker / orbit-mobile → Security & Privacy**: preserve default/data scrubbers, Prevent Storing IP, sensitive fields and geography-child removal rule. No performance sampling.
+2. Expo **ORBIT → Project settings → Environment variables**: mobile ingestion DSN is public; SENTRY_AUTH_TOKEN uses **Secret** visibility. Never put it under EXPO_PUBLIC.
+3. On the signed phone, trigger an approved non-sensitive diagnostic, remove the trigger, and verify correct mobile release/source lines with no private context.
+4. Separately verify actual deployed API/worker error routing/alert ownership. Synthetic Node ingestion is not a native SDK test or a production-route crash.
+5. Verify worker/mobile newly ingested diagnostics omit inferred geography after the final wildcard rule. Existing old diagnostic events were not deleted.
+6. Missing/failed source-map upload must still stop server startup. [Evidence and privacy limits](PROVIDER_SETUP_VERIFICATION.md).
 
 ## Gate 5 — initialize EAS and build
 
-1. In a terminal run `cd apps/mobile` and `pnpm dlx eas-cli@latest login`. Use the Expo account that will own ORBIT.
-2. In Expo Dashboard click **Projects → Create a project**, name it `ORBIT`, and copy its project UUID. Alternatively run `pnpm dlx eas-cli@latest init`; if it writes the UUID into source, remove that source edit before committing.
-3. In Expo Dashboard open **ORBIT → Project settings → Environment variables → Create variable**. For `development`, `preview`, and `production`, create plaintext `EXPO_PUBLIC_EAS_PROJECT_ID=<uuid>`. Also create `EXPO_PUBLIC_API_URL=https://<API_DOMAIN>`, `EXPO_PUBLIC_WS_URL=wss://<API_DOMAIN>/v1/stream`, and `EXPO_PUBLIC_SENTRY_DSN=<mobile-public-dsn>` in preview/production. These values are readable in the app bundle and must never contain a private key.
-4. Add `SENTRY_ORG`, `SENTRY_PROJECT`, and secret `SENTRY_AUTH_TOKEN` to preview/production. Before each local EAS command, export the project UUID only in that terminal as `EXPO_PUBLIC_EAS_PROJECT_ID`; do not add it to Git.
-5. Run `pnpm dlx eas-cli@latest config --platform ios` and the Android equivalent. Confirm version `0.1.0`, iOS build `1`, Android version code `1`, package/bundle ID `com.orbit.companion`, production channel, and HTTPS/WSS URLs.
-6. Run `pnpm dlx eas-cli@latest build --platform ios --profile production`. When asked, sign in to the Apple Developer account, select the correct team, and let EAS create or reuse the distribution certificate and profile.
-7. Run `pnpm dlx eas-cli@latest build --platform android --profile preview`. The checked-in preview profile uses `distribution: internal` and `buildType: apk`, so the result is directly installable.
+1. Existing **hetul** account and CLI login are verified. Dedicated **ORBIT / orbit** project is created. Reuse it; no new account or duplicate init. Official browser login succeeded; no sudo/chmod or account-wide API token was needed.
+2. Open **ORBIT → Project settings → Environment variables**. The project UUID is stored there, not hardcoded into Git. Export it only in the local command environment for EAS CLI config/build commands.
+3. Seven project variables are saved in development/preview/production. Public project ID, API HTTPS, WS WSS and mobile DSN are separate from server/private credentials. API host is **orbit-api-production-807e.up.railway.app**; WS path **/v1/stream**. Do not point a shipped binary at localhost.
+4. SENTRY_ORG and SENTRY_PROJECT are saved; SENTRY_AUTH_TOKEN is saved with **Secret** visibility. It is available to cloud builds, not readable from EAS CLI or the public bundle.
+5. Resolved iOS production / Android preview configs were verified: version **0.1.0**, initial build/code **1**, **com.orbit.companion**, proper distribution/channel, Updates appVersion runtime and mobile Sentry plugin. Cloud builds/native runtime are still unverified.
+6. Run `pnpm dlx eas-cli@latest build --platform ios --profile production`. Founder signs into Apple/2FA personally and confirms the team. Obtain scoped approval before new certificate/profile/APNs credentials; do not revoke unrelated certificates.
+7. After scoped ORBIT keystore approval, run `pnpm dlx eas-cli@latest build --platform android --profile preview`. Profile is internal APK; successful signing/build/install and digest still require actual evidence.
 8. In Expo Dashboard open **ORBIT → Builds**, open each completed build, and retain the build URL. Do not mark a queued or failed build as delivered.
 9. Upload iOS using `pnpm dlx eas-cli@latest submit --platform ios --profile production --latest`. This uploads to App Store Connect/TestFlight; it does not submit the public App Store version.
 

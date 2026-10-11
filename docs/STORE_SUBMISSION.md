@@ -20,7 +20,7 @@ Prepared October 9, 2026; contact/owned-domain status updated October 11. This p
 | Support URL                              | `https://orbitapp.world/support/`                                                                             |
 | Contact email                            | `patelhetul803@gmail.com`; founder-approved public support contact; receipt/monitoring drill remains required |
 
-These owned-domain static pages returned HTTPS 200 on October 11; they do not depend on the undeployed Railway API. Domain email is optional branding, not a Google consent prerequisite. A support inbox does not replace a verified transactional sender/Resend key, operator coverage or a private reviewer account. A public issue must never contain a sign-in code, Gmail content or other private data.
+These owned-domain static pages returned HTTPS 200 on October 11; they are independent of the now-deployed Railway API. Resend sending DNS/key are verified and local founder OTP reached onboarding; a support inbox still does not establish operator coverage or a private reviewer account. Domain email is optional branding. No public issue may contain a sign-in code, Gmail content or private data.
 
 ## Listing copy
 

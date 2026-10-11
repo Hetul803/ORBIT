@@ -1,5 +1,28 @@
 # ORBIT Pass 5 verification and handoff
 
+## October 11 deployment addendum — current state
+
+The remainder of this document preserves the **October 9 historical pass**, including its transcripts, cause breakdown and then-unavailable providers. Its old statements that no API/email/EAS setup exists are superseded by [current product report](PUBLIC_ALPHA_VERIFICATION.md) and [provider verification](PROVIDER_SETUP_VERIFICATION.md).
+
+Now verified: local real Resend OTP Delivered and founder human onboarding; four Railway services online with resource caps/private data networking; sixteen production migrations; public [health](https://orbit-api-production-807e.up.railway.app/health) / [readiness](https://orbit-api-production-807e.up.railway.app/ready) HTTP 200; closed alpha status capacity 100 / safety_coverage; production source-map uploads; readable local compiled source diagnostics; Resend restricted key replacement/revocation; dedicated Expo project, saved environments, authenticated CLI and resolved iOS/Android configs. Latest local suite **148 passed, zero skipped**. Main application source **92d8199**, latest hosted CI blocked before execution by GitHub billing. No new paid matching evaluation here; original transcripts/rates remain historical, not new outcome evidence.
+
+| Required deployed/device check             | Current evidence                                                              | Release result                              |
+| ------------------------------------------ | ----------------------------------------------------------------------------- | ------------------------------------------- |
+| 1. Fresh real-email account                | Local founder OTP/onboarding confirmed; production admission closed           | Unverified on deployed phone                |
+| 2. Interview/name/Today; returning install | Local code/tests and onboarding entry only                                    | Unverified on fresh native install          |
+| 3. Google/Catch/source                     | Local OAuth configured; production Google disabled, no actual grant           | Unverified                                  |
+| 4. Two accounts/match/mutual reveal        | Existing integration/evaluation evidence only                                 | Unverified on two deployed devices          |
+| 5. Airplane mode                           | Existing owner-cache/mobile tests only                                        | Unverified native sweep                     |
+| 6. Kill API                                | Existing honest error-state tests only; no deliberate production outage       | Unverified native sweep                     |
+| 7. Deliberate cost cap                     | Applied 10/50-cent API caps and zero worker allowance; integration tests      | Unverified signed-release demonstration     |
+| 8. Delete/countdown/cancel                 | Existing integration evidence                                                 | Unverified deployed phone buttons           |
+| 9. Export/signature                        | Existing archive/signature integration evidence                               | Unverified deployed phone export            |
+| 10. No development shortcuts               | Production boot/config gates active, migrations/no seed; signed binary absent | Runtime evidence, native inspection pending |
+
+Public admission remains closed. Founder paid Apple membership is reported, not inspected signing/team evidence. Signing approvals and Apple access remain needed. The owned landing has no invented TestFlight/APK links. See [updated click paths](LAUNCH_CHECKLIST.md), [moderation commitment](MODERATION_RUNBOOK.md), [budget](BUDGETED_DEPLOYMENT.md). An HTTPS curl from this workstation is not cellular/different-network proof. No primary/deployed database was wiped to create evidence.
+
+---
+
 Evidence date: Friday, October 9, 2026. Target dates: founder iPhone Saturday, October 10; roughly 25 invited users Monday, October 12. This report concerns the limited beta, not public store submission.
 
 ## Decision
