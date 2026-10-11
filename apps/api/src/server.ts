@@ -1,5 +1,5 @@
 import { createPrismaClient } from '@orbit/db';
-import { scrubTelemetryEvent } from '@orbit/shared';
+import { privateTelemetryDataCollection, scrubTelemetryEvent } from '@orbit/shared';
 import * as Sentry from '@sentry/node';
 
 import { buildApp } from './app.js';
@@ -13,6 +13,7 @@ if (config.SENTRY_DSN !== undefined) {
     // Founder alpha uses error monitoring only; no paid performance sampling.
     tracesSampleRate: 0,
     traceLifecycle: 'static',
+    dataCollection: privateTelemetryDataCollection,
     beforeBreadcrumb: () => null,
     beforeSend: scrubTelemetryEvent,
     beforeSendTransaction: scrubTelemetryEvent,

@@ -1,8 +1,23 @@
 import { describe, expect, it } from 'vitest';
 
-import { scrubTelemetryEvent } from './telemetry.js';
+import { privateTelemetryDataCollection, scrubTelemetryEvent } from './telemetry.js';
 
 describe('private release diagnostics', () => {
+  it('explicitly disables the server SDK data categories instead of relying on defaults', () => {
+    expect(privateTelemetryDataCollection).toEqual({
+      userInfo: false,
+      cookies: false,
+      httpHeaders: false,
+      httpBodies: [],
+      urlQueryParams: false,
+      genAI: { inputs: false, outputs: false },
+      databaseQueryData: false,
+      queues: false,
+      graphQL: { document: false, variables: false },
+      stackFrameVariables: false,
+      frameContextLines: 0,
+    });
+  });
   it('removes secret-bearing context while retaining source frames and request IDs', () => {
     const sensitive = 'person@example.test token-123456 message-body';
     const event = scrubTelemetryEvent({
@@ -13,6 +28,7 @@ describe('private release diagnostics', () => {
       breadcrumbs: [{ message: sensitive }],
       message: sensitive,
       logentry: { formatted: sensitive },
+      server_name: sensitive,
       transaction: '/callback?code=token-123456',
       exception: {
         values: [

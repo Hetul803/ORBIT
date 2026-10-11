@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { createPrismaClient, deliverModerationAlerts } from '@orbit/db';
-import { scrubTelemetryEvent } from '@orbit/shared';
+import { privateTelemetryDataCollection, scrubTelemetryEvent } from '@orbit/shared';
 import { Queue, Worker, type Job } from 'bullmq';
 import * as Sentry from '@sentry/node';
 
@@ -22,6 +22,7 @@ if (config.SENTRY_DSN !== undefined) {
     // Founder alpha uses error monitoring only; no paid performance sampling.
     tracesSampleRate: 0,
     traceLifecycle: 'static',
+    dataCollection: privateTelemetryDataCollection,
     beforeBreadcrumb: () => null,
     beforeSend: scrubTelemetryEvent,
     beforeSendTransaction: scrubTelemetryEvent,
