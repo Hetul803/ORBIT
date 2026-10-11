@@ -17,6 +17,7 @@ vi.mock('@/api', () => {
       message: string,
       public readonly status: number,
       public readonly code: string,
+      public readonly details?: unknown,
     ) {
       super(message);
     }

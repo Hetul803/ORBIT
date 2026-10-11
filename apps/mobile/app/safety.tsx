@@ -4,6 +4,7 @@ import { Button, Card, OrbitText, Pill, Screen } from '@orbit/ui';
 
 import { api, jsonBody } from '@/api';
 import { AppHeader, ErrorText, Field, Notice } from '@/components';
+import { refreshSafetySurfaces } from '@/safety-updates';
 
 export default function Safety(): ReactNode {
   const params = useLocalSearchParams<{
@@ -20,9 +21,14 @@ export default function Safety(): ReactNode {
   );
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [confirmBlock, setConfirmBlock] = useState(false);
   const act = async (kind: 'mute' | 'block' | 'report'): Promise<void> => {
+    setBusy(true);
     setError(null);
     try {
+      let reportReceipt:
+        { conversationSuppressed: boolean; operatorAlerts: { configured: boolean } } | undefined;
       if (kind === 'block')
         await api(
           '/v1/blocks',
@@ -34,7 +40,10 @@ export default function Safety(): ReactNode {
           jsonBody({ userId: subjectUserId, reason: detail || 'User safety choice' }),
         );
       else
-        await api(
+        reportReceipt = await api<{
+          conversationSuppressed: boolean;
+          operatorAlerts: { configured: boolean };
+        }>(
           '/v1/reports',
           jsonBody({
             subjectUserId,
@@ -47,13 +56,17 @@ export default function Safety(): ReactNode {
         );
       setMessage(
         kind === 'block'
-          ? 'Blocked. New matching and contact are stopped.'
+          ? 'Blocked immediately in both directions. Existing introductions, transcripts and new contact are stopped. This block has no expiry or unblock option. It cannot erase contact details already copied outside ORBIT.'
           : kind === 'mute'
             ? 'Muted. Their activity is hidden without notifying them.'
-            : 'Report received by the moderation queue.',
+            : `Report recorded. ${reportReceipt?.conversationSuppressed ? 'The reported conversation is hidden pending review.' : 'No conversation was attached to this report.'} ${reportReceipt?.operatorAlerts.configured ? 'Operator email and push alerts are attempted immediately and retried if their providers are unavailable.' : 'Operator alerts are not configured in this local environment; this is not a staffed public alpha.'}`,
       );
+      setConfirmBlock(false);
+      if (kind !== 'mute') await refreshSafetySurfaces().catch(() => undefined);
     } catch (caught: unknown) {
       setError(caught instanceof Error ? caught.message : 'The safety action failed.');
+    } finally {
+      setBusy(false);
     }
   };
   const createPlan = async (): Promise<void> => {
@@ -75,6 +88,19 @@ export default function Safety(): ReactNode {
       setError(caught instanceof Error ? caught.message : 'The safety plan could not be created.');
     }
   };
+  const checkIn = async (): Promise<void> => {
+    if (plan === null) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api(`/v1/safety-plans/${plan.id}/check-in`, jsonBody({}));
+      setMessage('Checked in safely.');
+    } catch (caught: unknown) {
+      setError(caught instanceof Error ? caught.message : 'Check-in was not saved. Try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <Screen>
       <AppHeader
@@ -91,7 +117,10 @@ export default function Safety(): ReactNode {
         <Field
           label="User ID"
           value={subjectUserId}
-          onChangeText={setSubjectUserId}
+          onChangeText={(value) => {
+            setSubjectUserId(value);
+            setConfirmBlock(false);
+          }}
           hint="Available from the person-facing surface that brought you here."
         />
         <Field label="What happened?" value={detail} onChangeText={setDetail} multiline />
@@ -99,20 +128,33 @@ export default function Safety(): ReactNode {
           label="Mute quietly"
           onPress={() => void act('mute')}
           kind="secondary"
-          disabled={subjectUserId.length < 8}
+          disabled={subjectUserId.length < 8 || busy}
         />
         <Button
-          label="Block immediately"
-          onPress={() => void act('block')}
+          label={confirmBlock ? 'Confirm permanent block' : 'Block this person'}
+          onPress={() => {
+            if (confirmBlock) void act('block');
+            else setConfirmBlock(true);
+          }}
           kind="danger"
-          disabled={subjectUserId.length < 8}
+          disabled={subjectUserId.length < 8 || busy}
         />
         <Button
           label="Send report"
           onPress={() => void act('report')}
           kind="secondary"
-          disabled={subjectUserId.length < 8 || detail.length === 0}
+          disabled={subjectUserId.length < 8 || detail.length === 0 || busy}
         />
+        {confirmBlock ? (
+          <>
+            <Notice
+              title="No expiry or unblock option"
+              detail="Confirming stops contact in both directions immediately. You cannot undo this block for these accounts. Previously copied contact details cannot be erased."
+              tone="ember"
+            />
+            <Button label="Cancel block" kind="quiet" onPress={() => setConfirmBlock(false)} />
+          </>
+        ) : null}
       </Card>
       <Card tone="moss">
         <OrbitText variant="title">Meeting safety plan</OrbitText>
@@ -140,14 +182,7 @@ export default function Safety(): ReactNode {
               detail={`Share: ${plan.shareUrl}\nCheck in by ${new Date(plan.checkInDueAt).toLocaleString()}`}
               tone="blue"
             />
-            <Button
-              label="I’m safe — check in"
-              onPress={() =>
-                void api(`/v1/safety-plans/${plan.id}/check-in`, jsonBody({})).then(() =>
-                  setMessage('Checked in safely.'),
-                )
-              }
-            />
+            <Button label="I’m safe — check in" loading={busy} onPress={() => void checkIn()} />
           </>
         )}
       </Card>

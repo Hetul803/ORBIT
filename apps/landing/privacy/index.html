@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Privacy Policy · ORBIT</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <main class="legal">
+      <a class="back" href="/">← ORBIT home</a>
+      <p class="eyebrow">YOUR DATA. YOUR CHOICES.</p>
+      <h1>Privacy policy.</h1>
+      <p>Effective October 11, 2026 · ORBIT limited alpha · com.orbit.companion</p>
+      <p>
+        ORBIT helps adults remember commitments, review their own life, and discover introductions
+        through a user-controlled agent. This policy describes the current alpha, not future
+        features.
+      </p>
+      <h2>Information we process</h2>
+      <p>
+        Account email, display name, date of birth for the 18+ gate, verification timestamps,
+        optional phone or campus verification, and one-way IP hashes for abuse controls; interview
+        answers, agent names, memories, preferences, constraints, goals, intents, skills, and
+        feedback; Catch actions, watcher results, approvals, introductions, reveal choices, reports
+        and blocks; device push tokens, platforms and notification settings; model usage, costs,
+        timing, request IDs and operational diagnostics. User-selected imports can produce stored
+        facts and import metadata. No precise location, contacts, advertising ID, cross-app
+        tracking, microphone or camera access is requested by this build.
+      </p>
+      <h2>Optional Google access</h2>
+      <p>
+        One consent flow requests Gmail read-only (gmail.readonly) and Google Calendar read-only
+        (calendar.readonly). Google access is restricted to named test users while verification is
+        pending. Connecting Google is not required to use ORBIT.
+      </p>
+      <p>
+        For Gmail we read message and thread identifiers, sender, recipients, subject, date, labels,
+        source links and message text. Message text is processed in memory to derive bounded signals
+        such as a possible reply, commitment, date or renewal. Gmail message bodies are not
+        retained. Stored Gmail records contain metadata, derived signals and links to original
+        messages. ORBIT never sends an email on your behalf.
+      </p>
+      <p>
+        For the primary Calendar we store event identifiers, titles, start/end times, status, links
+        and descriptions for the next 14 days. These support source-backed Catch items. ORBIT cannot
+        create, change or delete calendar events.
+      </p>
+      <p>
+        Google refresh tokens are encrypted at rest. Disconnect erases our token and attempts
+        revocation at Google; if Google is unreachable, revocation cannot be confirmed. In testing,
+        grants may expire and require reconnecting. We separately record token expiry, a reconnect
+        prompt actually shown, a reconnect attempt and a successful reconnection, so those events
+        are not mistaken for ordinary retention.
+      </p>
+      <p>
+        Use and transfer of Google API information is limited to providing or improving the
+        user-facing features described here and follows the Google API Services User Data Policy,
+        including Limited Use requirements.
+      </p>
+      <h2>Models and service providers</h2>
+      <p>
+        The configured model provider receives the bounded context required for an agent task. ORBIT
+        does not use private user data to train a shared model, sell it, or use it for advertising.
+        Providers process requests under their own terms; the operator must validate private-data
+        settings before opening admission. Application logs omit credentials, email addresses and
+        private message bodies. Service infrastructure processes data where its providers operate.
+      </p>
+      <h2>Introductions, reports and blocks</h2>
+      <p>
+        Agent conversations pass a privacy redaction gate before becoming visible. Both people must
+        choose to reveal contact details. Reporting a conversation hides it from both participants
+        before review. Authorized operators can inspect privacy-cleared text and the report; viewing
+        and moderation actions are audited. Resend receives the operator’s email and a generic
+        report reference, not report text or participant identities. Expo push receives registered
+        operator device tokens and a generic safety alert. Email/push providers accepting a request
+        is not proof a person read it.
+      </p>
+      <p>
+        A block stops contact in both directions for the two accounts, has no expiry and no
+        user-facing unblock option. It cannot erase previously copied details, prevent a person
+        creating a different identity, or recall a delivered notification. Limited safety/audit
+        records may be retained where necessary to protect people or meet legal obligations.
+      </p>
+      <h2>The waitlist</h2>
+      <p>
+        After a verified email code, you may choose to join the waitlist when admission is full or
+        paused. We store your verified email and join time solely to manage that waitlist. Joining
+        creates no account, place reservation or promised invitation date. No automatic marketing or
+        invitation email is sent. Remove your entry from the waitlist screen while the verification
+        is valid, or verify your email again to remove it.
+      </p>
+      <h2>Export, deletion and retention</h2>
+      <p>
+        Settings → Create signed export produces an archive of your account data. Settings → Delete
+        account starts a seven-day cancellation period; after it ends, the deletion worker removes
+        the account and associated personal data. Google disconnection erases tokens immediately.
+        Security, fraud, safety and legal records may be retained only where necessary. Copies
+        already delivered to alert providers have their own retention policies and cannot be
+        recalled by deleting an account. A separate authenticated waitlist entry must be removed
+        separately.
+      </p>
+      <h2>Adults only and security</h2>
+      <p>
+        ORBIT is for people 18 and older. A rejected under-18 email cannot be replayed into an adult
+        account. Deployed transport uses HTTPS, with field encryption for provider tokens and
+        user-supplied model keys. Authentication and roles restrict access. No service can guarantee
+        absolute security.
+      </p>
+      <h2>Contact a human</h2>
+      <p id="private-support">
+        Contact <a href="mailto:patelhetul803@gmail.com">patelhetul803@gmail.com</a> privately for
+        account and privacy questions. Do not post account, report, sign-in code or Gmail content in
+        public issues.
+      </p>
+      <p>
+        Signed-in users can report in the Safety center. ORBIT is not an emergency response service.
+        Contact local emergency services for immediate danger.
+      </p>
+      <h2>Changes</h2>
+      <p>
+        We update this date for material changes and provide notice before they apply when required.
+      </p>
+      <p><a href="/terms/">Terms of service</a> · <a href="/support/">Support & deletion</a></p>
+    </main>
+  </body>
+</html>

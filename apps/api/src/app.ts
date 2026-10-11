@@ -17,6 +17,7 @@ import { verifyAccessToken } from './auth.js';
 import type { ApiConfig } from './config.js';
 import { ApiError } from './errors.js';
 import { registerAuthRoutes } from './routes/auth.js';
+import { registerAdmissionRoutes } from './routes/admission.js';
 import { registerCoreRoutes } from './routes/core.js';
 import { registerGmailRoutes } from './routes/gmail.js';
 import { registerLegalRoutes } from './routes/legal.js';
@@ -71,6 +72,14 @@ const registerRealtime = async (app: FastifyInstance, services: Services): Promi
     }
     try {
       const auth = await verifyAccessToken(token, services.config);
+      const user = await services.db.user.findUnique({
+        where: { id: auth.id },
+        select: { status: true, deletedAt: true },
+      });
+      if (user?.deletedAt !== null || user.status !== 'ACTIVE') {
+        socket.close(1008, 'Account unavailable');
+        return;
+      }
       services.realtime.add(auth.id, socket);
       socket.send(
         JSON.stringify({
@@ -116,6 +125,7 @@ export const buildApp = async (db: PrismaClient, config: ApiConfig): Promise<Fas
     requestIdHeader: false,
     genReqId: () => randomUUID(),
   });
+  app.decorate('orbitDb', db);
   const services = createServices(db, config);
   registerObservability(app);
   await app.register(sensible);
@@ -145,9 +155,10 @@ export const buildApp = async (db: PrismaClient, config: ApiConfig): Promise<Fas
     await db.$queryRaw`SELECT 1`;
     return { ok: true, database: 'ready', at: new Date().toISOString() };
   });
-  registerLegalRoutes(app);
+  registerLegalRoutes(app, services.config);
 
   registerAuthRoutes(app, services);
+  registerAdmissionRoutes(app, services);
   registerCoreRoutes(app, services);
   registerProfileRoutes(app, services);
   registerProactiveRoutes(app, services);

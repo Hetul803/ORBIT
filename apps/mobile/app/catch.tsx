@@ -7,6 +7,7 @@ import { Linking, Pressable, StyleSheet, View } from 'react-native';
 import { Button, Card, OrbitText, Pill, Ring, Screen, Skeleton, spacing } from '@orbit/ui';
 
 import { api, jsonBody } from '@/api';
+import { useGoogleReconnectPrompt } from '@/google-reconnect';
 import { AppHeader, EmptyState, ErrorText, Notice, QueryError } from '@/components';
 import type { LifeItem, SourceCitation } from '@/types';
 
@@ -110,9 +111,15 @@ export default function Catch(): ReactNode {
     queryFn: () =>
       api<{
         reconnectRequired: boolean;
-        connection: { lastSyncedAt: string | null } | null;
+        connection: { lastSyncedAt: string | null; expiredAt: string | null } | null;
       }>('/v1/connections/gmail/status'),
   });
+  useGoogleReconnectPrompt(
+    'catch',
+    googleStatus.data?.reconnectRequired === true,
+    googleStatus.data?.connection?.expiredAt,
+    googleStatus.dataUpdatedAt,
+  );
   const refresh = async (): Promise<void> => {
     await Promise.all([
       query.refetch(),

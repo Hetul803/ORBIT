@@ -30,8 +30,13 @@ const environmentSchema = z.object({
   OTP_IP_REQUESTS_PER_15_MINUTES: z.coerce.number().int().positive().default(20),
   OTP_FAILED_ATTEMPTS_PER_15_MINUTES: z.coerce.number().int().positive().default(10),
   ACCOUNT_CREATION_PER_IP_PER_DAY: z.coerce.number().int().positive().default(5),
-  DEPLOYMENT_ACCOUNT_CAP: z.coerce.number().int().positive().default(50),
+  DEPLOYMENT_ACCOUNT_CAP: z.coerce.number().int().positive().max(100).default(100),
+  PUBLIC_ALPHA_SIGNUPS_OPEN: z.enum(['true', 'false']).default('false'),
+  MODERATION_OPERATOR_EMAILS: z.string().default(''),
+  MODERATION_COVERAGE_CONFIRMED: z.enum(['true', 'false']).default('false'),
+  SUPPORT_EMAIL: z.string().default(''),
   RESEND_API_KEY: z.string().optional(),
+  EXPO_ACCESS_TOKEN: z.string().optional(),
   RESEND_FROM_EMAIL: z.string().default('ORBIT <hello@example.com>'),
   PHONE_OTP_PROVIDER: z.enum(['disabled', 'log', 'twilio']).default('log'),
   TWILIO_ACCOUNT_SID: z.string().optional(),
@@ -41,6 +46,9 @@ const environmentSchema = z.object({
   SEARCH_API_ENDPOINT: z.url().default('https://api.search.brave.com/res/v1/web/search'),
   SEARCH_API_KEY: z.string().optional(),
   GOOGLE_OAUTH_CLIENT_ID: z.string().optional(),
+  GOOGLE_CLOUD_PROJECT_ID: z.string().optional(),
+  GOOGLE_OAUTH_VERIFICATION_STATUS: z.enum(['testing', 'verified']).default('testing'),
+  GOOGLE_TEST_USER_EMAILS: z.string().default(''),
   GOOGLE_OAUTH_CLIENT_SECRET: z.string().optional(),
   GOOGLE_OAUTH_REDIRECT_URI: optionalUrl,
   ORBIT_MOBILE_REDIRECT_URL: z.string().default('orbit://connections'),
@@ -94,6 +102,21 @@ const assertProductionConfig = (config: ApiConfig): void => {
     productionError('OTP_DELIVERY_MODE', 'must be resend');
   }
   if (!config.RESEND_API_KEY) productionError('RESEND_API_KEY', 'is required');
+  if (
+    !z.email().safeParse(config.SUPPORT_EMAIL).success ||
+    config.SUPPORT_EMAIL.endsWith('@example.com')
+  )
+    productionError('SUPPORT_EMAIL', 'must identify a monitored private support mailbox');
+  const operators = config.MODERATION_OPERATOR_EMAILS.split(',').map((email) => email.trim());
+  if (
+    operators.length === 0 ||
+    operators.some((email) => !z.email().safeParse(email).success || email.endsWith('@example.com'))
+  )
+    productionError('MODERATION_OPERATOR_EMAILS', 'must contain private operator mailboxes');
+  if (config.PUBLIC_ALPHA_SIGNUPS_OPEN === 'true') {
+    if (config.MODERATION_COVERAGE_CONFIRMED !== 'true')
+      productionError('MODERATION_COVERAGE_CONFIRMED', 'must confirm staffed alpha coverage');
+  }
   if (config.RESEND_FROM_EMAIL.includes('example.com')) {
     productionError('RESEND_FROM_EMAIL', 'must use a verified non-example domain');
   }
@@ -160,15 +183,27 @@ const assertProductionConfig = (config: ApiConfig): void => {
   }
   if (
     config.GMAIL_INTEGRATION_ENABLED === 'true' &&
-    (!config.GOOGLE_OAUTH_CLIENT_ID ||
+    (!config.GOOGLE_CLOUD_PROJECT_ID ||
+      !config.GOOGLE_OAUTH_CLIENT_ID ||
       !config.GOOGLE_OAUTH_CLIENT_SECRET ||
       !config.GOOGLE_OAUTH_REDIRECT_URI)
   ) {
     productionError(
-      'GOOGLE_OAUTH_CLIENT_ID/GOOGLE_OAUTH_CLIENT_SECRET/GOOGLE_OAUTH_REDIRECT_URI',
-      'are required when GMAIL_INTEGRATION_ENABLED=true',
+      'GOOGLE_CLOUD_PROJECT_ID/GOOGLE_OAUTH_CLIENT_ID/GOOGLE_OAUTH_CLIENT_SECRET/GOOGLE_OAUTH_REDIRECT_URI',
+      'must identify the newly created ORBIT project when GMAIL_INTEGRATION_ENABLED=true',
     );
   }
+  if (
+    config.GMAIL_INTEGRATION_ENABLED === 'true' &&
+    config.GOOGLE_OAUTH_VERIFICATION_STATUS === 'testing' &&
+    !config.GOOGLE_TEST_USER_EMAILS.split(',').some(
+      (email) => z.email().safeParse(email.trim()).success,
+    )
+  )
+    productionError(
+      'GOOGLE_TEST_USER_EMAILS',
+      'must list named test users while Google verification is pending',
+    );
 };
 
 export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): ApiConfig => {

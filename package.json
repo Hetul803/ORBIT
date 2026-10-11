@@ -10,6 +10,7 @@
   },
   "scripts": {
     "build": "turbo run build",
+    "build:landing": "node scripts/build-landing.mjs",
     "dev": "turbo run dev --parallel",
     "pretypecheck": "pnpm db:generate",
     "typecheck": "turbo run typecheck",

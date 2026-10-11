@@ -34,6 +34,7 @@ jobs:
     env:
       NODE_ENV: test
       DATABASE_URL: postgresql://orbit:orbit@localhost:5432/orbit_test?schema=public
+      ALPHA_TEST_DATABASE_URL: postgresql://orbit:orbit@localhost:5432/orbit_test_alpha?schema=public
       REDIS_URL: redis://localhost:6379
       JWT_ACCESS_SECRET: ci-access-secret-at-least-thirty-two-characters
       JWT_REFRESH_SECRET: ci-refresh-secret-at-least-thirty-two-characters
@@ -54,6 +55,10 @@ jobs:
       - run: pnpm audit --audit-level high
       - run: pnpm db:generate
       - run: pnpm --filter @orbit/db migrate:deploy
+      - name: Prepare isolated public-alpha integration database
+        run: |
+          psql postgresql://orbit:orbit@localhost:5432/postgres -c 'CREATE DATABASE orbit_test_alpha'
+          DATABASE_URL="$ALPHA_TEST_DATABASE_URL" pnpm --filter @orbit/db migrate:deploy
       - run: pnpm db:seed
       - run: pnpm format:check
       - run: pnpm lint

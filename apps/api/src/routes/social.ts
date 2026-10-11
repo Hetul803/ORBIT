@@ -1,4 +1,12 @@
-import { RevealDecision, RunStatus, queuePush, type IntentKind } from '@orbit/db';
+import {
+  RevealDecision,
+  RunStatus,
+  queuePush,
+  type IntentKind,
+  visibleIntroductionWhere,
+  unblockedUserWhere,
+  lockSafetyPair,
+} from '@orbit/db';
 import {
   introductionDecisionSchema,
   introductionOutcomeSchema,
@@ -97,6 +105,7 @@ export const registerSocialRoutes = (app: FastifyInstance, services: Services): 
       services.db.user.count({
         where: {
           id: { not: auth.id },
+          ...unblockedUserWhere(auth.id),
           status: 'ACTIVE',
           deletedAt: null,
           agent: { is: { deletedAt: null, onboardingCompletedAt: { not: null } } },
@@ -126,8 +135,7 @@ export const registerSocialRoutes = (app: FastifyInstance, services: Services): 
       where: {
         deletedAt: null,
         expiresAt: { gt: new Date() },
-        conversation: { redactionPassed: true, deletedAt: null },
-        OR: [{ userAId: auth.id }, { userBId: auth.id }],
+        ...visibleIntroductionWhere(auth.id),
       },
       include: introductionInclude,
       orderBy: { createdAt: 'desc' },
@@ -142,8 +150,7 @@ export const registerSocialRoutes = (app: FastifyInstance, services: Services): 
       where: {
         id: params.id,
         deletedAt: null,
-        conversation: { redactionPassed: true, deletedAt: null },
-        OR: [{ userAId: auth.id }, { userBId: auth.id }],
+        ...visibleIntroductionWhere(auth.id),
       },
       include: introductionInclude,
     });
@@ -159,8 +166,7 @@ export const registerSocialRoutes = (app: FastifyInstance, services: Services): 
       where: {
         id: params.id,
         deletedAt: null,
-        conversation: { redactionPassed: true, deletedAt: null },
-        OR: [{ userAId: auth.id }, { userBId: auth.id }],
+        ...visibleIntroductionWhere(auth.id),
       },
       include: {
         ...introductionInclude,
@@ -195,13 +201,19 @@ export const registerSocialRoutes = (app: FastifyInstance, services: Services): 
     const params = parseWith(idParamsSchema, request.params);
     const body = parseWith(introductionDecisionSchema, request.body);
     const result = await services.db.$transaction(async (tx) => {
+      const pair = await tx.introduction.findFirst({
+        where: { id: params.id, OR: [{ userAId: auth.id }, { userBId: auth.id }] },
+        select: { userAId: true, userBId: true },
+      });
+      if (!pair)
+        throw new ApiError(404, 'INTRODUCTION_NOT_FOUND', 'That introduction is unavailable.');
+      await lockSafetyPair(tx, pair.userAId, pair.userBId);
       const record = await tx.introduction.findFirst({
         where: {
           id: params.id,
           deletedAt: null,
           expiresAt: { gt: new Date() },
-          conversation: { redactionPassed: true },
-          OR: [{ userAId: auth.id }, { userBId: auth.id }],
+          ...visibleIntroductionWhere(auth.id),
         },
         include: {
           ...introductionInclude,
@@ -314,10 +326,12 @@ export const registerSocialRoutes = (app: FastifyInstance, services: Services): 
       type: 'introduction.decision_recorded',
       payload: { introductionId: params.id },
     });
-    const fresh = await services.db.introduction.findUniqueOrThrow({
-      where: { id: params.id },
+    const fresh = await services.db.introduction.findFirst({
+      where: { id: params.id, ...visibleIntroductionWhere(auth.id) },
       include: introductionInclude,
     });
+    if (!fresh)
+      throw new ApiError(404, 'INTRODUCTION_NOT_FOUND', 'That introduction is unavailable.');
     if (fresh.revealedAt !== null) {
       await Promise.all(
         [fresh.userAId, fresh.userBId].map((userId) =>
@@ -339,7 +353,7 @@ export const registerSocialRoutes = (app: FastifyInstance, services: Services): 
     const params = parseWith(idParamsSchema, request.params);
     const body = parseWith(introductionOutcomeSchema, request.body);
     const introduction = await services.db.introduction.findFirst({
-      where: { id: params.id, OR: [{ userAId: auth.id }, { userBId: auth.id }] },
+      where: { id: params.id, ...visibleIntroductionWhere(auth.id) },
     });
     if (introduction === null)
       throw new ApiError(404, 'INTRODUCTION_NOT_FOUND', 'That introduction was not found.');
@@ -370,6 +384,8 @@ export const registerSocialRoutes = (app: FastifyInstance, services: Services): 
         deletedAt: null,
         expiresAt: { gt: new Date() },
         OR: [{ haveItem: { userId: auth.id } }, { wantItem: { userId: auth.id } }],
+        haveItem: { user: unblockedUserWhere(auth.id) },
+        wantItem: { user: unblockedUserWhere(auth.id) },
       },
       include: { haveItem: { include: { user: true } }, wantItem: { include: { user: true } } },
       orderBy: { createdAt: 'desc' },
@@ -412,44 +428,58 @@ export const registerSocialRoutes = (app: FastifyInstance, services: Services): 
     const auth = await requireAuth(request, services.config);
     const params = parseWith(idParamsSchema, request.params);
     const body = parseWith(z.object({ decision: z.enum(['accept', 'reject']) }), request.body);
-    const proposal = await services.db.exchangeProposal.findFirst({
-      where: {
-        id: params.id,
-        deletedAt: null,
-        expiresAt: { gt: new Date() },
-        OR: [{ haveItem: { userId: auth.id } }, { wantItem: { userId: auth.id } }],
-      },
-      include: { haveItem: true, wantItem: true },
+    return services.db.$transaction(async (tx) => {
+      const existing = await tx.exchangeProposal.findFirst({
+        where: {
+          id: params.id,
+          OR: [{ haveItem: { userId: auth.id } }, { wantItem: { userId: auth.id } }],
+        },
+        include: { haveItem: true, wantItem: true },
+      });
+      if (!existing)
+        throw new ApiError(404, 'PROPOSAL_NOT_FOUND', 'That exchange proposal is unavailable.');
+      await lockSafetyPair(tx, existing.haveItem.userId, existing.wantItem.userId);
+      const proposal = await tx.exchangeProposal.findFirst({
+        where: {
+          id: params.id,
+          deletedAt: null,
+          expiresAt: { gt: new Date() },
+          OR: [{ haveItem: { userId: auth.id } }, { wantItem: { userId: auth.id } }],
+          haveItem: { user: unblockedUserWhere(auth.id) },
+          wantItem: { user: unblockedUserWhere(auth.id) },
+        },
+        include: { haveItem: true, wantItem: true },
+      });
+      if (proposal === null)
+        throw new ApiError(404, 'PROPOSAL_NOT_FOUND', 'That exchange proposal is unavailable.');
+      const isHave = proposal.haveItem.userId === auth.id;
+      const decision = body.decision === 'accept' ? RevealDecision.REVEAL : RevealDecision.DECLINE;
+      const afterA = isHave ? decision : proposal.userADecision;
+      const afterB = isHave ? proposal.userBDecision : decision;
+      const acceptedAt =
+        afterA === RevealDecision.REVEAL && afterB === RevealDecision.REVEAL ? new Date() : null;
+      await tx.exchangeProposal.update({
+        where: { id: proposal.id },
+        data: {
+          ...(isHave ? { userADecision: decision } : { userBDecision: decision }),
+          ...(acceptedAt === null ? {} : { acceptedAt }),
+        },
+      });
+      await logActivity(tx, {
+        userId: auth.id,
+        actorType: 'USER',
+        action:
+          body.decision === 'accept' ? 'exchange.proposal_accepted' : 'exchange.proposal_rejected',
+        targetType: 'ExchangeProposal',
+        targetId: proposal.id,
+        payload: { noMoneyHandled: true },
+        requestId: request.id,
+      });
+      return {
+        ok: true,
+        acceptedAt: iso(acceptedAt),
+        moneyNotice: 'ORBIT handles no money and takes no fee.',
+      };
     });
-    if (proposal === null)
-      throw new ApiError(404, 'PROPOSAL_NOT_FOUND', 'That exchange proposal is unavailable.');
-    const isHave = proposal.haveItem.userId === auth.id;
-    const decision = body.decision === 'accept' ? RevealDecision.REVEAL : RevealDecision.DECLINE;
-    const afterA = isHave ? decision : proposal.userADecision;
-    const afterB = isHave ? proposal.userBDecision : decision;
-    const acceptedAt =
-      afterA === RevealDecision.REVEAL && afterB === RevealDecision.REVEAL ? new Date() : null;
-    await services.db.exchangeProposal.update({
-      where: { id: proposal.id },
-      data: {
-        ...(isHave ? { userADecision: decision } : { userBDecision: decision }),
-        ...(acceptedAt === null ? {} : { acceptedAt }),
-      },
-    });
-    await logActivity(services.db, {
-      userId: auth.id,
-      actorType: 'USER',
-      action:
-        body.decision === 'accept' ? 'exchange.proposal_accepted' : 'exchange.proposal_rejected',
-      targetType: 'ExchangeProposal',
-      targetId: proposal.id,
-      payload: { noMoneyHandled: true },
-      requestId: request.id,
-    });
-    return {
-      ok: true,
-      acceptedAt: iso(acceptedAt),
-      moneyNotice: 'ORBIT handles no money and takes no fee.',
-    };
   });
 };

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 
-import { queuePush, type PrismaClient } from '@orbit/db';
+import { queuePush, lockSafetyPair, isPairBlocked, type PrismaClient } from '@orbit/db';
 import type { ModelRouter } from '@orbit/llm';
 import { watcherSpecSchema } from '@orbit/shared';
 import { CronExpressionParser } from 'cron-parser';
@@ -546,35 +546,46 @@ const matchExchange = async (db: PrismaClient): Promise<number> => {
       where: { haveItemId_wantItemId: { haveItemId: top.id, wantItemId: want.id } },
     });
     if (existing !== null) continue;
-    await db.exchangeProposal.create({
-      data: {
-        haveItemId: top.id,
-        wantItemId: want.id,
-        terms: {
-          summary: `Proposed direct handoff: ${top.title} for ${want.title}.`,
-          itemCondition: top.condition,
-          suggestedPlace: 'A staffed public campus location',
-          suggestedWindow: 'Agree on a broad time window after mutual acceptance',
-          payment: false,
+    const created = await db.$transaction(async (tx) => {
+      await lockSafetyPair(tx, top.userId, want.userId);
+      if (await isPairBlocked(tx, top.userId, want.userId)) return false;
+      if (
+        await tx.exchangeProposal.findUnique({
+          where: { haveItemId_wantItemId: { haveItemId: top.id, wantItemId: want.id } },
+        })
+      )
+        return false;
+      await tx.exchangeProposal.create({
+        data: {
+          haveItemId: top.id,
+          wantItemId: want.id,
+          terms: {
+            summary: `Proposed direct handoff: ${top.title} for ${want.title}.`,
+            itemCondition: top.condition,
+            suggestedPlace: 'A staffed public campus location',
+            suggestedWindow: 'Agree on a broad time window after mutual acceptance',
+            payment: false,
+          },
+          negotiation: [
+            {
+              side: 'have',
+              text: `Offered ${top.title} in ${top.condition ?? 'unspecified'} condition.`,
+            },
+            {
+              side: 'want',
+              text: `Requested ${want.title}; boundaries: ${want.willTradeFor ?? 'direct handoff only'}.`,
+            },
+            {
+              side: 'system',
+              text: 'Proposed a public-place handoff. ORBIT will not process payment.',
+            },
+          ],
+          expiresAt: new Date(Date.now() + 7 * 86_400_000),
         },
-        negotiation: [
-          {
-            side: 'have',
-            text: `Offered ${top.title} in ${top.condition ?? 'unspecified'} condition.`,
-          },
-          {
-            side: 'want',
-            text: `Requested ${want.title}; boundaries: ${want.willTradeFor ?? 'direct handoff only'}.`,
-          },
-          {
-            side: 'system',
-            text: 'Proposed a public-place handoff. ORBIT will not process payment.',
-          },
-        ],
-        expiresAt: new Date(Date.now() + 7 * 86_400_000),
-      },
+      });
+      return true;
     });
-    proposals += 1;
+    if (created) proposals += 1;
   }
   return proposals;
 };

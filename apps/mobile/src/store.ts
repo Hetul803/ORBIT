@@ -2,6 +2,7 @@ import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import { create } from 'zustand';
+import { useWaitlistStore } from './waitlist';
 
 interface AuthState {
   accessToken: string | null;
@@ -99,6 +100,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     });
   },
   signOut: async () => {
+    useWaitlistStore.getState().clear();
     set({ accessToken: null, refreshToken: null, onboarded: false, resumeOnboarding: false });
     const [{ queryClient }, { clearOfflineData }] = await Promise.all([
       import('./query'),

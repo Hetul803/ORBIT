@@ -9,6 +9,9 @@ const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   SENTRY_DSN: optionalUrl,
   SENTRY_ENVIRONMENT: z.string().default('development'),
+  RESEND_API_KEY: z.string().optional(),
+  RESEND_FROM_EMAIL: z.string().default('ORBIT <hello@example.com>'),
+  EXPO_ACCESS_TOKEN: z.string().optional(),
   DATABASE_URL: z.string().default('postgresql://orbit:orbit@localhost:5432/orbit?schema=public'),
   REDIS_URL: z.string().default('redis://localhost:6379'),
   LLM_DEFAULT_PROVIDER: z
@@ -35,6 +38,7 @@ const schema = z.object({
   CONSOLIDATION_CRON: z.string().default('30 4 * * *'),
   DELETION_CRON: z.string().default('0 4 * * *'),
   PUSH_TICK_CRON: z.string().default('* * * * *'),
+  MODERATION_TICK_CRON: z.string().default('*/5 * * * * *'),
   PROACTIVE_TICK_CRON: z.string().default('15 * * * *'),
   PROACTIVE_DAILY_CAP: z.coerce.number().int().positive().max(12).default(6),
 });
@@ -59,6 +63,9 @@ export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): Worker
     fail('FIELD_ENCRYPTION_KEY', 'must be 32 fresh random bytes encoded as base64');
   }
   if (!config.SENTRY_DSN) fail('SENTRY_DSN', 'is required');
+  if (!config.RESEND_API_KEY) fail('RESEND_API_KEY', 'is required for moderation retries');
+  if (config.RESEND_FROM_EMAIL.includes('example.com'))
+    fail('RESEND_FROM_EMAIL', 'must use a verified non-example domain');
   if (config.LLM_DEFAULT_PROVIDER === 'stub') {
     fail('LLM_DEFAULT_PROVIDER', 'must select a real provider');
   }

@@ -9,6 +9,7 @@ import {
   type Urgency,
   UserStatus,
   type PrismaClient,
+  visibleIntroductionWhere,
 } from '@orbit/db';
 import {
   createAgentSchema,
@@ -214,9 +215,11 @@ const exportUserData = async (
       intents: { where: { deletedAt: null } },
       exchangeItems: { where: { deletedAt: null } },
       introductionsAsA: {
+        where: visibleIntroductionWhere(userId),
         include: { conversation: { include: { messages: true } }, reveals: true },
       },
       introductionsAsB: {
+        where: visibleIntroductionWhere(userId),
         include: { conversation: { include: { messages: true } }, reveals: true },
       },
       watchers: { include: { hits: true } },

@@ -13,6 +13,15 @@ interface Report {
   detail: string;
   status: string;
   createdAt: string;
+  acknowledgedAt: string | null;
+  firstActionAt: string | null;
+  alerts: {
+    id: string;
+    channel: string;
+    status: string;
+    attempts: number;
+    lastError: string | null;
+  }[];
   reporter: { id: string; displayName: string };
   subject: { id: string; displayName: string };
   actions: { id: string; action: string; reason: string }[];
@@ -38,16 +47,31 @@ interface Audit {
 const ReportCard = ({ report }: { report: Report }): ReactNode => {
   const client = useQueryClient();
   const [reason, setReason] = useState('');
+  const [review, setReview] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<string | null>(null);
+  const transcript = useQuery({
+    queryKey: ['admin-report', report.id],
+    queryFn: () =>
+      api<{
+        transcriptAvailable: boolean;
+        messages: { turn: number; side: string; text: string }[];
+        note: string;
+      }>(`/v1/admin/reports/${report.id}`),
+    enabled: review,
+  });
   const mutation = useMutation({
-    mutationFn: (action: 'dismiss' | 'warn' | 'suspend' | 'restore') =>
-      api(`/v1/admin/reports/${report.id}/action`, jsonBody({ action, reason })),
-    onMutate: async () => {
+    mutationFn: (
+      action: 'acknowledge' | 'first_action' | 'dismiss' | 'warn' | 'suspend' | 'restore',
+    ) => api(`/v1/admin/reports/${report.id}/action`, jsonBody({ action, reason })),
+    onMutate: async (action) => {
       await client.cancelQueries({ queryKey: ['admin-moderation'] });
       const previous = client.getQueryData<Queue>(['admin-moderation']);
       client.setQueryData<Queue>(['admin-moderation'], (current) =>
         current === undefined
           ? current
-          : { ...current, reports: current.reports.filter((entry) => entry.id !== report.id) },
+          : ['acknowledge', 'first_action'].includes(action)
+            ? current
+            : { ...current, reports: current.reports.filter((entry) => entry.id !== report.id) },
       );
       return { previous };
     },
@@ -70,17 +94,98 @@ const ReportCard = ({ report }: { report: Report }): ReactNode => {
       <OrbitText variant="caption">
         Reported by {report.reporter.displayName} · {new Date(report.createdAt).toLocaleString()}
       </OrbitText>
-      <Field label="Required moderation reason" value={reason} onChangeText={setReason} multiline />
-      {(['dismiss', 'warn', 'suspend', 'restore'] as const).map((action) => (
-        <Button
-          key={action}
-          label={action.toUpperCase()}
-          kind={action === 'suspend' ? 'danger' : 'secondary'}
-          disabled={reason.trim().length < 3}
-          loading={mutation.isPending}
-          onPress={() => mutation.mutate(action)}
-        />
+      <OrbitText variant="caption">
+        {report.firstActionAt === null
+          ? 'No first action recorded'
+          : `First action ${new Date(report.firstActionAt).toLocaleTimeString()}`}
+      </OrbitText>
+      <OrbitText variant="caption">
+        Acknowledge by{' '}
+        {new Date(new Date(report.createdAt).getTime() + 15 * 60_000).toLocaleTimeString()} · First
+        action by{' '}
+        {new Date(new Date(report.createdAt).getTime() + 60 * 60_000).toLocaleTimeString()}
+      </OrbitText>
+      <OrbitText variant="caption">
+        {report.acknowledgedAt === null
+          ? 'Not yet acknowledged'
+          : `Acknowledged ${new Date(report.acknowledgedAt).toLocaleTimeString()}`}
+      </OrbitText>
+      {report.alerts.map((alert) => (
+        <OrbitText key={alert.id} variant="caption">
+          {alert.channel.toUpperCase()}:{' '}
+          {alert.status === 'SENT'
+            ? 'Provider accepted (not a human receipt)'
+            : `${alert.status} · ${String(alert.attempts)} attempts · ${alert.lastError ?? 'awaiting first attempt'}`}
+        </OrbitText>
       ))}
+      <Button
+        label={review ? 'Hide review transcript' : 'Review redacted transcript'}
+        kind="secondary"
+        onPress={() => setReview(!review)}
+      />
+      {review ? (
+        transcript.isError ? (
+          <QueryError
+            message={transcript.error.message}
+            onRetry={() => void transcript.refetch()}
+          />
+        ) : transcript.isPending ? (
+          <OrbitText>Loading restricted review…</OrbitText>
+        ) : (
+          <>
+            {transcript.data.transcriptAvailable ? (
+              transcript.data.messages.map((message) => (
+                <Card key={message.turn}>
+                  <Pill>AGENT {message.side.toUpperCase()}</Pill>
+                  <OrbitText>{message.text}</OrbitText>
+                </Card>
+              ))
+            ) : (
+              <OrbitText>
+                No privacy-cleared transcript is available. Do not request raw model text.
+              </OrbitText>
+            )}
+            <OrbitText variant="caption">{transcript.data.note}</OrbitText>
+          </>
+        )
+      ) : null}
+      <Field label="Required moderation reason" value={reason} onChangeText={setReason} multiline />
+      {(['acknowledge', 'first_action', 'dismiss', 'warn', 'suspend', 'restore'] as const).map(
+        (action) => (
+          <Button
+            key={action}
+            label={
+              confirmAction === action
+                ? `CONFIRM ${action.toUpperCase()}`
+                : action === 'first_action'
+                  ? 'RECORD FIRST ACTION'
+                  : action.toUpperCase()
+            }
+            kind={action === 'suspend' ? 'danger' : 'secondary'}
+            disabled={reason.trim().length < 3 || mutation.isPending}
+            loading={mutation.isPending}
+            onPress={() => {
+              if (['acknowledge', 'first_action'].includes(action) || confirmAction === action) {
+                setConfirmAction(null);
+                mutation.mutate(action);
+              } else setConfirmAction(action);
+            }}
+          />
+        ),
+      )}
+      {confirmAction === null ? null : (
+        <>
+          <OrbitText variant="caption">
+            This records an attributable moderation decision. Closing a report does not restore its
+            conversation or remove a block.
+          </OrbitText>
+          <Button
+            label="Cancel moderation action"
+            kind="quiet"
+            onPress={() => setConfirmAction(null)}
+          />
+        </>
+      )}
       {mutation.error === null ? null : <ErrorText message={mutation.error.message} />}
     </Card>
   );
@@ -93,6 +198,7 @@ export default function Admin(): ReactNode {
     queryKey: ['admin-moderation'],
     queryFn: () => api<Queue>('/v1/admin/moderation'),
     enabled: allowed,
+    refetchInterval: 5_000,
   });
   const audit = useQuery({
     queryKey: ['admin-audit'],

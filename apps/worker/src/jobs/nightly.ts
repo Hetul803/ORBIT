@@ -15,6 +15,9 @@ import {
   Prisma,
   type IntentKind,
   type PrismaClient,
+  lockSafetyPair,
+  isPairBlocked,
+  visibleIntroductionWhere,
 } from '@orbit/db';
 import { CostCapError, type ModelRouter } from '@orbit/llm';
 import type { IntentKind as ApiIntentKind } from '@orbit/shared';
@@ -200,14 +203,36 @@ const storeConversation = async (
       steps: [{ name: 'Compatibility conversation', status: 'running', detail: '', durationMs: 0 }],
     },
   });
-  const conversation = await db.agentConversation.create({
-    data: {
-      intentKind: input.intent.kind,
-      agentAId: input.source.id,
-      agentBId: input.target.id,
-      status: ConversationStatus.RUNNING,
-    },
+  const conversation = await db.$transaction(async (tx) => {
+    await lockSafetyPair(tx, input.source.userId, input.target.userId);
+    if (await isPairBlocked(tx, input.source.userId, input.target.userId)) return null;
+    return tx.agentConversation.create({
+      data: {
+        intentKind: input.intent.kind,
+        agentAId: input.source.id,
+        agentBId: input.target.id,
+        status: ConversationStatus.RUNNING,
+      },
+    });
   });
+  if (conversation === null) {
+    await db.run.update({
+      where: { id: run.id },
+      data: {
+        status: RunStatus.SUCCEEDED,
+        endedAt: new Date(),
+        steps: [
+          {
+            name: 'Safety boundary',
+            status: 'succeeded',
+            detail: 'Blocked pair skipped.',
+            durationMs: 0,
+          },
+        ],
+      },
+    });
+    return false;
+  }
   const startedAt = Date.now();
   try {
     const result = await runBoundedConversation(
@@ -235,7 +260,18 @@ const storeConversation = async (
           : result.status === 'moderation_flagged'
             ? ConversationStatus.MODERATION_FLAGGED
             : ConversationStatus.REDACTION_FAILED;
+    let surfaced = false;
     await db.$transaction(async (tx) => {
+      await lockSafetyPair(tx, input.source.userId, input.target.userId);
+      const current = await tx.agentConversation.findUniqueOrThrow({
+        where: { id: conversation.id },
+        select: { suppressedAt: true, status: true },
+      });
+      const blocked = await isPairBlocked(tx, input.source.userId, input.target.userId);
+      const suppressed =
+        blocked ||
+        current.suppressedAt !== null ||
+        current.status === ConversationStatus.MODERATION_FLAGGED;
       for (const turn of result.turns) {
         await tx.agentMessage.create({
           data: {
@@ -262,7 +298,8 @@ const storeConversation = async (
       await tx.agentConversation.update({
         where: { id: conversation.id },
         data: {
-          status,
+          status: suppressed ? ConversationStatus.MODERATION_FLAGGED : status,
+          ...(suppressed ? { suppressedAt: current.suppressedAt ?? new Date() } : {}),
           turnCount: result.turns.length,
           redactionPassed: result.redactionPassed,
           ...(result.verdict === null ? {} : { verdict: result.verdict }),
@@ -279,7 +316,12 @@ const storeConversation = async (
         },
         data: { status: MatchStatus.CONVERSED },
       });
-      if (result.redactionPassed && result.verdict !== null && result.verdict.score >= 60) {
+      if (
+        !suppressed &&
+        result.redactionPassed &&
+        result.verdict !== null &&
+        result.verdict.score >= 60
+      ) {
         await tx.introduction.create({
           data: {
             conversationId: conversation.id,
@@ -290,6 +332,7 @@ const storeConversation = async (
             expiresAt: new Date(Date.now() + 14 * 86_400_000),
           },
         });
+        surfaced = true;
       }
       await tx.run.update({
         where: { id: run.id },
@@ -311,7 +354,7 @@ const storeConversation = async (
         },
       });
     });
-    return result.redactionPassed && result.verdict !== null && result.verdict.score >= 60;
+    return surfaced;
   } catch (error: unknown) {
     await db.$transaction([
       db.agentConversation.update({
@@ -351,7 +394,7 @@ const buildBriefs = async (db: PrismaClient): Promise<void> => {
       db.introduction.findMany({
         where: {
           createdAt: { gte: today },
-          OR: [{ userAId: user.id }, { userBId: user.id }],
+          ...visibleIntroductionWhere(user.id),
         },
         include: { conversation: true },
         take: 8,

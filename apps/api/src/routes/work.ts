@@ -6,6 +6,10 @@ import {
   type ScreeningAction,
   SkillStatus,
   queuePush,
+  isPairBlocked,
+  lockSafetyPair,
+  unblockedUserWhere,
+  visibleIntroductionWhere,
 } from '@orbit/db';
 import {
   approveInboxSchema,
@@ -169,7 +173,26 @@ export const registerWorkRoutes = (app: FastifyInstance, services: Services): vo
           data: { openedAt: new Date() },
         });
       }
-      return brief.payload;
+      const visible = await services.db.introduction.findMany({
+        where: visibleIntroductionWhere(auth.id),
+        select: { id: true },
+      });
+      const visibleIds = new Set(visible.map((intro) => intro.id));
+      const payload = asRecord(brief.payload);
+      const items = asArray(payload.items).filter((item) => {
+        const row = asRecord(item);
+        const route =
+          typeof row.route === 'string' ? row.route : typeof row.href === 'string' ? row.href : '';
+        const id = /(?:^|\/)introduction\/([^/?]+)/u.exec(route)?.[1];
+        return id === undefined || visibleIds.has(id);
+      });
+      const needsUserCount = items.filter((item) => asRecord(item).needsUser === true).length;
+      return {
+        ...payload,
+        items,
+        needsUserCount,
+        greeting: `${String(typeof payload.completedCount === 'number' ? payload.completedCount : 0)} done. ${String(needsUserCount)} need you.`,
+      };
     }
     const [recentRuns, needsUser] = await Promise.all([
       services.db.run.count({
@@ -196,7 +219,11 @@ export const registerWorkRoutes = (app: FastifyInstance, services: Services): vo
   app.get('/v1/inbox', async (request) => {
     const auth = await requireAuth(request, services.config);
     const items = await services.db.inboxItem.findMany({
-      where: { recipientUserId: auth.id, deletedAt: null },
+      where: {
+        recipientUserId: auth.id,
+        deletedAt: null,
+        OR: [{ senderUserId: null }, { senderUser: unblockedUserWhere(auth.id) }],
+      },
       orderBy: { createdAt: 'desc' },
     });
     return items.map((item) => ({
@@ -228,6 +255,11 @@ export const registerWorkRoutes = (app: FastifyInstance, services: Services): vo
       throw new ApiError(404, 'INBOX_ITEM_NOT_FOUND', 'That inbox item is unavailable.');
     const approvedAt = new Date();
     await services.db.$transaction(async (tx) => {
+      if (current.senderUserId !== null) {
+        await lockSafetyPair(tx, auth.id, current.senderUserId);
+        if (await isPairBlocked(tx, auth.id, current.senderUserId))
+          throw new ApiError(404, 'INBOX_ITEM_NOT_FOUND', 'That inbox item is unavailable.');
+      }
       await tx.inboxItem.update({
         where: { id: current.id },
         data: { agentReply: body.editedReply, approvedAt, triage: InboxTriage.HELD },
@@ -298,7 +330,11 @@ export const registerWorkRoutes = (app: FastifyInstance, services: Services): vo
         ? body.matchOn.subjectIncludes.toLowerCase()
         : '';
     const items = await services.db.inboxItem.findMany({
-      where: { recipientUserId: auth.id, deletedAt: null },
+      where: {
+        recipientUserId: auth.id,
+        deletedAt: null,
+        OR: [{ senderUserId: null }, { senderUser: unblockedUserWhere(auth.id) }],
+      },
       orderBy: { createdAt: 'desc' },
       take: 10,
     });
@@ -685,24 +721,36 @@ export const registerWorkRoutes = (app: FastifyInstance, services: Services): vo
     });
     if (skill === null) throw new ApiError(404, 'SKILL_NOT_FOUND', 'That skill was not found.');
     const recipient = await services.db.user.findFirst({
-      where: body.recipient.includes('@')
-        ? { email: body.recipient.toLowerCase() }
-        : { handle: body.recipient.replace(/^@/u, '').toLowerCase() },
+      where: {
+        AND: [
+          body.recipient.includes('@')
+            ? { email: body.recipient.toLowerCase() }
+            : { handle: body.recipient.replace(/^@/u, '').toLowerCase() },
+          unblockedUserWhere(auth.id),
+        ],
+        status: 'ACTIVE',
+        deletedAt: null,
+      },
     });
     if (recipient === null)
       throw new ApiError(404, 'RECIPIENT_NOT_FOUND', 'No ORBIT user matches that email or handle.');
     if (recipient.id === auth.id)
       throw new ApiError(400, 'SELF_SHARE', 'Choose another ORBIT user.');
-    const inbox = await services.db.inboxItem.create({
-      data: {
-        recipientUserId: recipient.id,
-        senderUserId: auth.id,
-        kind: `skill_share:${skill.id}`,
-        subject: `${skill.name} was shared with you`,
-        body: `Inspect and adopt version ${String(skill.version)}. Shared skills never carry payment.`,
-        triage: InboxTriage.ESCALATED,
-        agentReply: null,
-      },
+    const inbox = await services.db.$transaction(async (tx) => {
+      await lockSafetyPair(tx, auth.id, recipient.id);
+      if (await isPairBlocked(tx, auth.id, recipient.id))
+        throw new ApiError(404, 'RECIPIENT_NOT_FOUND', 'That recipient is unavailable.');
+      return tx.inboxItem.create({
+        data: {
+          recipientUserId: recipient.id,
+          senderUserId: auth.id,
+          kind: `skill_share:${skill.id}`,
+          subject: `${skill.name} was shared with you`,
+          body: `Inspect and adopt version ${String(skill.version)}. Shared skills never carry payment.`,
+          triage: InboxTriage.ESCALATED,
+          agentReply: null,
+        },
+      });
     });
     await queuePush(services.db, {
       userId: recipient.id,

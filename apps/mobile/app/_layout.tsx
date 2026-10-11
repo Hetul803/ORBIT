@@ -23,6 +23,9 @@ import { queryClient } from '@/query';
 import { installNotificationResponseHandler } from '@/notifications';
 import { useAuthStore, useNetworkStore } from '@/store';
 import { apiTransport } from '@/transport';
+import { configuredApiUrl } from '@/api';
+import { clearSocialOfflineCache } from '@/offline';
+import { subscribeSafetyUpdates } from '@/safety-updates';
 
 void SplashScreen.preventAutoHideAsync();
 
@@ -68,8 +71,13 @@ function RootLayout(): ReactNode {
   }, []);
   useEffect(() => {
     void hydrateOfflineQueue();
+    void clearSocialOfflineCache();
     void flushOfflineQueue(apiTransport).catch(() => undefined);
   }, []);
+  useEffect(() => {
+    if (accessToken === null || configuredApiUrl.length === 0) return;
+    return subscribeSafetyUpdates(accessToken, configuredApiUrl);
+  }, [accessToken]);
 
   const inAuth = segments[0] === '(auth)';
   const routeAllowed = accessToken === null ? inAuth : !inAuth;

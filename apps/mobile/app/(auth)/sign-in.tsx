@@ -6,6 +6,7 @@ import { Button, Card, OrbitText, Screen, spacing } from '@orbit/ui';
 import { api, ApiRequestError, configuredApiUrl, jsonBody } from '@/api';
 import { ErrorText, Field, Notice, Wordmark } from '@/components';
 import { useAuthStore } from '@/store';
+import { useWaitlistStore } from '@/waitlist';
 
 interface OtpRequestResponse {
   ok: boolean;
@@ -68,6 +69,24 @@ export default function SignIn(): ReactNode {
       setNow(Date.now());
       setStep('code');
     } catch (caught: unknown) {
+      if (
+        caught instanceof ApiRequestError &&
+        ['EARLY_ACCESS_FULL', 'ALPHA_ADMISSION_PAUSED'].includes(caught.code)
+      ) {
+        const details =
+          typeof caught.details === 'object' && caught.details !== null
+            ? (caught.details as Record<string, unknown>)
+            : {};
+        useWaitlistStore.getState().set({
+          email,
+          verificationToken:
+            typeof details.waitlistToken === 'string' ? details.waitlistToken : null,
+          capacity: typeof details.capacity === 'number' ? details.capacity : 100,
+          paused: caught.code === 'ALPHA_ADMISSION_PAUSED',
+        });
+        router.replace('/waitlist');
+        return;
+      }
       setError(authError(caught));
     } finally {
       setBusy(false);
@@ -85,6 +104,24 @@ export default function SignIn(): ReactNode {
       await setTokens(result.accessToken, result.refreshToken);
       router.replace(result.hasAgent ? '/today' : '/agent');
     } catch (caught: unknown) {
+      if (
+        caught instanceof ApiRequestError &&
+        ['EARLY_ACCESS_FULL', 'ALPHA_ADMISSION_PAUSED'].includes(caught.code)
+      ) {
+        const details =
+          typeof caught.details === 'object' && caught.details !== null
+            ? (caught.details as Record<string, unknown>)
+            : {};
+        useWaitlistStore.getState().set({
+          email,
+          verificationToken:
+            typeof details.waitlistToken === 'string' ? details.waitlistToken : null,
+          capacity: typeof details.capacity === 'number' ? details.capacity : 100,
+          paused: caught.code === 'ALPHA_ADMISSION_PAUSED',
+        });
+        router.replace('/waitlist');
+        return;
+      }
       setError(authError(caught));
     } finally {
       setBusy(false);

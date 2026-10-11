@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import { createPrismaClient } from '@orbit/db';
+import { createPrismaClient, deliverModerationAlerts } from '@orbit/db';
 import { scrubTelemetryEvent } from '@orbit/shared';
 import { Queue, Worker, type Job } from 'bullmq';
 import * as Sentry from '@sentry/node';
@@ -40,6 +40,8 @@ const execute = async (name: string, requestId: string): Promise<unknown> => {
       return runDeletion(prisma, config);
     case 'push':
       return deliverPush(prisma);
+    case 'moderation':
+      return deliverModerationAlerts(prisma, config);
     case 'proactive':
       return runProactive(prisma, config);
     default:
@@ -54,6 +56,7 @@ if (config.RUN_WORKER_ONCE === 'true') {
     'deletion',
     'nightly',
     'push',
+    'moderation',
     'proactive',
   ] as const;
   const selected = config.WORKER_ONCE_JOBS?.split(',')
@@ -78,6 +81,7 @@ if (config.RUN_WORKER_ONCE === 'true') {
     { name: 'consolidation', pattern: config.CONSOLIDATION_CRON },
     { name: 'deletion', pattern: config.DELETION_CRON },
     { name: 'push', pattern: config.PUSH_TICK_CRON },
+    { name: 'moderation', pattern: config.MODERATION_TICK_CRON },
     { name: 'proactive', pattern: config.PROACTIVE_TICK_CRON },
   ] as const;
   const queues: Queue[] = [];

@@ -50,6 +50,21 @@ export const clearOfflineData = async (): Promise<void> => {
   useNetworkStore.getState().setQueuedWrites(0);
 };
 
+export const clearSocialOfflineCache = async (): Promise<void> => {
+  const sensitive = (key: string): boolean =>
+    key.startsWith('orbit.offline.cache.') &&
+    [encodeURIComponent('/v1/introductions'), encodeURIComponent('/v1/brief')].some((path) =>
+      key.includes(path),
+    );
+  if (Platform.OS === 'web') {
+    for (const key of Object.keys(globalThis.localStorage))
+      if (sensitive(key)) globalThis.localStorage.removeItem(key);
+  } else {
+    const keys = (await AsyncStorage.getAllKeys()).filter(sensitive);
+    if (keys.length > 0) await AsyncStorage.multiRemove(keys);
+  }
+};
+
 export { isOfflineQueueable, isOfflineReadable } from './offline-policy';
 
 export const cacheResponse = async (

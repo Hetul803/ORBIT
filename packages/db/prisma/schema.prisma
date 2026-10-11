@@ -458,6 +458,7 @@ model AgentConversation {
   turnCount         Int                @default(0)
   verdict           Json?
   redactionPassed   Boolean            @default(false)
+  suppressedAt      DateTime?
   startedAt         DateTime           @default(now())
   endedAt           DateTime?
   agentA            Agent              @relation("ConversationAgentA", fields: [agentAId], references: [id], onDelete: Restrict)
@@ -826,21 +827,23 @@ model GroupMember {
 }
 
 model Connection {
-  id              String             @id @default(cuid())
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
-  deletedAt       DateTime?
-  userId          String
-  provider        ConnectionProvider
-  scopes          String[]
-  encryptedTokens String
-  status          ConnectionStatus   @default(ACTIVE)
-  lastSyncedAt    DateTime?
-  syncStatus      String             @default("idle")
-  syncProcessed   Int                @default(0)
-  syncTotal       Int?
-  syncStartedAt   DateTime?
-  user            User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                  String             @id @default(cuid())
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  deletedAt           DateTime?
+  userId              String
+  provider            ConnectionProvider
+  scopes              String[]
+  encryptedTokens     String
+  status              ConnectionStatus   @default(ACTIVE)
+  lastSyncedAt        DateTime?
+  syncStatus          String             @default("idle")
+  syncProcessed       Int                @default(0)
+  syncTotal           Int?
+  syncStartedAt       DateTime?
+  expiredAt           DateTime?
+  reconnectPromptedAt DateTime?
+  user                User               @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, provider])
   @@index([userId])
@@ -1058,15 +1061,47 @@ model Report {
   detail         String
   status         ReportStatus       @default(OPEN)
   resolvedBy     String?
+  acknowledgedAt DateTime?
+  firstActionAt  DateTime?
+  resolvedAt     DateTime?
   reporter       User               @relation("Reporter", fields: [reporterUserId], references: [id], onDelete: Restrict)
   subject        User               @relation("ReportSubject", fields: [subjectUserId], references: [id], onDelete: Restrict)
   conversation   AgentConversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
   actions        ModerationAction[]
+  alerts         ModerationAlert[]
 
   @@index([reporterUserId])
   @@index([subjectUserId])
   @@index([conversationId])
   @@index([status, createdAt])
+}
+
+model ModerationAlert {
+  id             String    @id @default(cuid())
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  reportId       String
+  channel        String
+  recipientKey   String
+  recipientEmail String?
+  operatorUserId String?
+  status         String    @default("PENDING")
+  attempts       Int       @default(0)
+  nextAttemptAt  DateTime  @default(now())
+  lockedAt       DateTime?
+  sentAt         DateTime?
+  lastError      String?
+  report         Report    @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@unique([reportId, channel, recipientKey])
+  @@index([status, nextAttemptAt])
+}
+
+model WaitlistEntry {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  email     String   @unique
+  source    String   @default("verified_otp")
 }
 
 model ModerationAction {

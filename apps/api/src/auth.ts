@@ -8,6 +8,12 @@ import type { ApiConfig } from './config.js';
 import { ApiError } from './errors.js';
 import { sha256 } from './crypto.js';
 
+declare module 'fastify' {
+  interface FastifyInstance {
+    orbitDb: PrismaClient;
+  }
+}
+
 export interface AuthenticatedUser {
   readonly id: string;
   readonly role: 'USER' | 'MODERATOR' | 'ADMIN';
@@ -83,7 +89,20 @@ export const requireAuth = async (
   if (header?.startsWith('Bearer ') !== true) {
     throw new ApiError(401, 'AUTH_REQUIRED', 'A valid access token is required.');
   }
-  return verifyAccessToken(header.slice('Bearer '.length), config);
+  const verified = await verifyAccessToken(header.slice('Bearer '.length), config);
+  const user = await request.server.orbitDb.user.findUnique({
+    where: { id: verified.id },
+    select: { id: true, role: true, status: true, deletedAt: true },
+  });
+  if (user?.deletedAt !== null)
+    throw new ApiError(401, 'ACCOUNT_UNAVAILABLE', 'This account is unavailable.');
+  if (user.status === 'SUSPENDED')
+    throw new ApiError(
+      403,
+      'ACCOUNT_SUSPENDED',
+      'This account is suspended. Contact the operator through Support.',
+    );
+  return { id: user.id, role: user.role };
 };
 
 export const verifyAccessToken = async (

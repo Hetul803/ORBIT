@@ -4,7 +4,8 @@ import { isOfflineQueueable, isOfflineReadable } from './offline-policy.js';
 
 describe('offline transport contract', () => {
   it('allows cached reads only for defined presentation screens', () => {
-    expect(isOfflineReadable('/v1/brief/today', 'GET')).toBe(true);
+    expect(isOfflineReadable('/v1/brief/today', 'GET')).toBe(false);
+    expect(isOfflineReadable('/v1/introductions/record-123/transcript', 'GET')).toBe(false);
     expect(isOfflineReadable('/v1/life/catch', 'GET')).toBe(true);
     expect(isOfflineReadable('/v1/profile/export', 'GET')).toBe(false);
     expect(isOfflineReadable('/v1/life/catch', 'POST')).toBe(false);

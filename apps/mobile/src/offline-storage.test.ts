@@ -7,6 +7,7 @@ import {
   cacheResponse,
   cachedResponse,
   clearOfflineData,
+  clearSocialOfflineCache,
   enqueueWrite,
   flushOfflineQueue,
 } from './offline';
@@ -24,6 +25,22 @@ describe('offline account isolation', () => {
     expect(await cachedResponse('/v1/life/catch')).toBeNull();
     useAuthStore.setState({ accessToken: null });
     expect(await cachedResponse('/v1/life/catch')).toBeNull();
+  });
+  it('removes legacy contact and Today caches without deleting personal Catch data or queued writes', async () => {
+    await cacheResponse('/v1/introductions/record-123/transcript', { contact: 'legacy contact' });
+    await cacheResponse('/v1/brief/today', { contact: 'legacy Today item' });
+    await cacheResponse('/v1/life/catch', { privateItem: 'personal Catch' });
+    await enqueueWrite('/v1/life/catch/record-123/dismiss', { method: 'POST' });
+    await clearSocialOfflineCache();
+    expect(await cachedResponse('/v1/introductions/record-123/transcript')).toBeNull();
+    expect(await cachedResponse('/v1/brief/today')).toBeNull();
+    expect((await cachedResponse('/v1/life/catch'))?.value).toEqual({
+      privateItem: 'personal Catch',
+    });
+    expect(
+      (await flushOfflineQueue(() => Promise.resolve(new Response(null, { status: 204 }))))
+        .replayed,
+    ).toBe(1);
   });
   it("does not replay one account's writes under another account or persist credentials", async () => {
     await enqueueWrite('/v1/life/catch/record-123/dismiss', {

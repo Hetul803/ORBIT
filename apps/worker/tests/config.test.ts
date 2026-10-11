@@ -10,6 +10,8 @@ const productionEnvironment = (): NodeJS.ProcessEnv => ({
   SENTRY_DSN: 'https://public@sentry.test/2',
   LLM_DEFAULT_PROVIDER: 'openrouter',
   OPENROUTER_API_KEY: 'server-only-openrouter-key',
+  RESEND_API_KEY: 'server-only-resend-key',
+  RESEND_FROM_EMAIL: 'ORBIT <safety@orbit.test>',
 });
 
 describe('worker production configuration', () => {
@@ -22,6 +24,7 @@ describe('worker production configuration', () => {
     ['REDIS_URL', { REDIS_URL: 'redis://localhost:6379' }],
     ['FIELD_ENCRYPTION_KEY', { FIELD_ENCRYPTION_KEY: Buffer.alloc(32).toString('base64') }],
     ['SENTRY_DSN', { SENTRY_DSN: '' }],
+    ['RESEND_API_KEY', { RESEND_API_KEY: '' }],
     ['LLM_DEFAULT_PROVIDER', { LLM_DEFAULT_PROVIDER: 'stub' }],
   ])('names %s when an unsafe production value is supplied', (name, override) => {
     expect(() => loadConfig({ ...productionEnvironment(), ...override })).toThrow(name);

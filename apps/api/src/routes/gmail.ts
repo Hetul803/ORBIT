@@ -9,10 +9,11 @@ import {
   queuePush,
 } from '@orbit/db';
 import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
 
 import { requireAuth } from '../auth.js';
 import { decryptField, encryptField, sha256 } from '../crypto.js';
-import { ApiError } from '../errors.js';
+import { ApiError, parseWith } from '../errors.js';
 import { refreshLifeItems } from '../life.js';
 import type { Services } from '../services.js';
 import { asRecord, logActivity } from './helpers.js';
@@ -41,6 +42,31 @@ const requireAvailable = (services: Services): void => {
       'Gmail is unavailable until the operator configures and enables Google OAuth.',
     );
   }
+};
+
+const googleUserEligible = async (services: Services, userId: string): Promise<boolean> => {
+  const user = await services.db.user.findUnique({
+    where: { id: userId },
+    select: { email: true, status: true, deletedAt: true },
+  });
+  if (user?.status !== 'ACTIVE' || user.deletedAt !== null) return false;
+  if (
+    services.config.NODE_ENV !== 'production' ||
+    services.config.GOOGLE_OAUTH_VERIFICATION_STATUS === 'verified'
+  )
+    return true;
+  return services.config.GOOGLE_TEST_USER_EMAILS.split(',')
+    .map((email) => email.trim().toLowerCase())
+    .includes(user.email);
+};
+
+const requireGoogleUser = async (services: Services, userId: string): Promise<void> => {
+  if (!(await googleUserEligible(services, userId)))
+    throw new ApiError(
+      403,
+      'GOOGLE_VERIFICATION_PENDING',
+      'Google access is limited to named test users until ORBIT’s Google verification is complete. Other ORBIT features remain available.',
+    );
 };
 
 const tokenRequest = async (
@@ -75,6 +101,7 @@ const tokenRequest = async (
 const accessTokenFor = async (
   services: Services,
   connection: { id: string; encryptedTokens: string },
+  requestId?: string,
 ): Promise<string> => {
   const stored = JSON.parse(
     decryptField(connection.encryptedTokens, services.config.FIELD_ENCRYPTION_KEY),
@@ -87,9 +114,29 @@ const accessTokenFor = async (
     });
   } catch (error: unknown) {
     if (error instanceof ApiError && error.code === 'GMAIL_RECONNECT_REQUIRED') {
-      await services.db.connection.update({
-        where: { id: connection.id },
-        data: { status: ConnectionStatus.EXPIRED },
+      await services.db.$transaction(async (tx) => {
+        const changed = await tx.connection.updateMany({
+          where: { id: connection.id, status: { not: 'EXPIRED' } },
+          data: {
+            status: ConnectionStatus.EXPIRED,
+            expiredAt: new Date(),
+            reconnectPromptedAt: null,
+          },
+        });
+        if (changed.count > 0) {
+          const record = await tx.connection.findUniqueOrThrow({
+            where: { id: connection.id },
+            select: { userId: true },
+          });
+          await logActivity(tx, {
+            userId: record.userId,
+            actorType: 'SYSTEM',
+            action: 'google.token_expired',
+            targetType: 'Connection',
+            targetId: connection.id,
+            ...(requestId === undefined ? {} : { requestId }),
+          });
+        }
       });
     }
     throw error;
@@ -322,13 +369,17 @@ export const registerGmailRoutes = (app: FastifyInstance, services: Services): v
         syncProcessed: true,
         syncTotal: true,
         syncStartedAt: true,
+        expiredAt: true,
       },
     });
+    const eligible = await googleUserEligible(services, auth.id);
     return {
-      available: available(services),
-      unavailableReason: available(services)
-        ? null
-        : 'The operator has not enabled a verified Google OAuth application.',
+      available: available(services) && eligible,
+      unavailableReason: !available(services)
+        ? 'The operator has not enabled a Google OAuth application.'
+        : !eligible
+          ? 'Google access is limited to named test users until ORBIT’s Google verification is complete. You can use ORBIT without connecting Google.'
+          : null,
       connected:
         connection !== null && connection.deletedAt === null && connection.status === 'ACTIVE',
       reconnectRequired:
@@ -344,14 +395,59 @@ export const registerGmailRoutes = (app: FastifyInstance, services: Services): v
               syncProcessed: connection.syncProcessed,
               syncTotal: connection.syncTotal,
               syncStartedAt: connection.syncStartedAt?.toISOString() ?? null,
+              expiredAt: connection.expiredAt?.toISOString() ?? null,
             }
           : null,
     };
   });
 
+  app.post('/v1/connections/gmail/reconnect-prompt', async (request) => {
+    const auth = await requireAuth(request, services.config);
+    const body = parseWith(
+      z.object({ source: z.enum(['connections', 'catch']), expiredAt: z.iso.datetime() }),
+      request.body,
+    );
+    return services.db.$transaction(async (tx) => {
+      const changed = await tx.connection.updateMany({
+        where: {
+          userId: auth.id,
+          provider: ConnectionProvider.GOOGLE,
+          status: ConnectionStatus.EXPIRED,
+          expiredAt: new Date(body.expiredAt),
+          deletedAt: null,
+          reconnectPromptedAt: null,
+        },
+        data: { reconnectPromptedAt: new Date() },
+      });
+      if (changed.count > 0)
+        await logActivity(tx, {
+          userId: auth.id,
+          actorType: 'USER',
+          action: 'google.reconnect_prompt_shown',
+          targetType: 'Connection',
+          payload: { source: body.source, expiredAt: body.expiredAt },
+          requestId: request.id,
+        });
+      return { ok: true, recorded: changed.count > 0 };
+    });
+  });
+
   app.post('/v1/connections/gmail/start', async (request) => {
     const auth = await requireAuth(request, services.config);
     requireAvailable(services);
+    await requireGoogleUser(services, auth.id);
+    const prior = await services.db.connection.findUnique({
+      where: { userId_provider: { userId: auth.id, provider: ConnectionProvider.GOOGLE } },
+      select: { status: true },
+    });
+    if (prior?.status === ConnectionStatus.EXPIRED)
+      await logActivity(services.db, {
+        userId: auth.id,
+        actorType: 'USER',
+        action: 'google.reconnect_started',
+        targetType: 'Connection',
+        requestId: request.id,
+      });
     const state = randomBytes(32).toString('base64url');
     await services.db.otpChallenge.create({
       data: {
@@ -400,6 +496,8 @@ export const registerGmailRoutes = (app: FastifyInstance, services: Services): v
         'The Google authorization state expired or was already used.',
       );
     }
+    if (!(await googleUserEligible(services, challenge.userId)))
+      return reply.redirect(`${services.config.ORBIT_MOBILE_REDIRECT_URL}?gmail=failed`);
     if (typeof query.error === 'string') {
       await services.db.otpChallenge.update({
         where: { id: challenge.id },
@@ -461,6 +559,10 @@ export const registerGmailRoutes = (app: FastifyInstance, services: Services): v
       JSON.stringify(stored),
       services.config.FIELD_ENCRYPTION_KEY,
     );
+    const prior = await services.db.connection.findUnique({
+      where: { userId_provider: { userId: challenge.userId, provider: ConnectionProvider.GOOGLE } },
+      select: { status: true },
+    });
     const connection = await services.db.connection.upsert({
       where: { userId_provider: { userId: challenge.userId, provider: ConnectionProvider.GOOGLE } },
       update: {
@@ -468,6 +570,8 @@ export const registerGmailRoutes = (app: FastifyInstance, services: Services): v
         scopes: [...googleReadonlyScopes],
         status: ConnectionStatus.ACTIVE,
         deletedAt: null,
+        expiredAt: null,
+        reconnectPromptedAt: null,
       },
       create: {
         userId: challenge.userId,
@@ -485,7 +589,10 @@ export const registerGmailRoutes = (app: FastifyInstance, services: Services): v
         data: {
           userId: challenge.userId,
           actorType: 'USER',
-          action: 'connection.gmail_connected',
+          action:
+            prior?.status === ConnectionStatus.EXPIRED
+              ? 'google.reconnected'
+              : 'connection.gmail_connected',
           targetType: 'Connection',
           targetId: connection.id,
           payload: { scopes: googleReadonlyScopes },
@@ -498,6 +605,7 @@ export const registerGmailRoutes = (app: FastifyInstance, services: Services): v
   app.post('/v1/connections/gmail/sync', async (request) => {
     const auth = await requireAuth(request, services.config);
     requireAvailable(services);
+    await requireGoogleUser(services, auth.id);
     const connection = await services.db.connection.findFirst({
       where: {
         userId: auth.id,
@@ -518,7 +626,7 @@ export const registerGmailRoutes = (app: FastifyInstance, services: Services): v
       },
     });
     try {
-      const accessToken = await accessTokenFor(services, connection);
+      const accessToken = await accessTokenFor(services, connection, request.id);
       const profile = await gmailJson('/profile', accessToken);
       const accountEmail =
         typeof profile.emailAddress === 'string' ? profile.emailAddress.toLowerCase() : '';

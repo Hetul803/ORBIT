@@ -7,6 +7,7 @@ vi.mock('expo-router', () => ({
   useLocalSearchParams: () => ({ id: 'record-12345678' }),
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
   useSegments: () => [],
+  usePathname: vi.fn(() => '/connections'),
   Stack: () => null,
   Tabs: () => null,
 }));

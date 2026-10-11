@@ -44,6 +44,7 @@ export class ApiRequestError extends Error {
     message: string,
     public readonly status: number,
     public readonly code: string,
+    public readonly details?: unknown,
   ) {
     super(message);
     this.name = 'ApiRequestError';
@@ -64,6 +65,7 @@ const decode = async <T>(response: Response): Promise<T> => {
       typeof error.message === 'string' ? error.message : 'ORBIT could not complete the request.',
       response.status,
       typeof error.code === 'string' ? error.code : 'REQUEST_FAILED',
+      error.details,
     );
   }
   return value as T;

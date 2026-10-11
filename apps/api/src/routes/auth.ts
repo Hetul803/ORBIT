@@ -11,6 +11,8 @@ import {
 } from '@orbit/shared';
 
 import { issueTokens, requireAuth, verifyRefreshToken } from '../auth.js';
+import { ALPHA_HARD_ACCOUNT_CAP, waitlistToken } from '../admission.js';
+import { alphaOperationsReady } from '../alpha-operations.js';
 import { constantTimeEqual, createOtp, sha256 } from '../crypto.js';
 import { ApiError, parseWith } from '../errors.js';
 import type { Services } from '../services.js';
@@ -313,12 +315,28 @@ export const registerAuthRoutes = (app: FastifyInstance, services: Services): vo
             tx.user.count({ where: { deletedAt: null } }),
             tx.user.count({ where: { signupIpHash: ipHash, createdAt: { gte: startOfDay } } }),
           ]);
-          if (accountCount >= services.config.DEPLOYMENT_ACCOUNT_CAP) {
+          if (
+            accountCount >= Math.min(ALPHA_HARD_ACCOUNT_CAP, services.config.DEPLOYMENT_ACCOUNT_CAP)
+          ) {
             throw new ApiError(
               503,
               'EARLY_ACCESS_FULL',
-              'The current ORBIT testing cohort is full.',
+              'ORBIT’s alpha is full. You can join the waitlist; no account or place has been reserved.',
+              {
+                waitlistToken: await waitlistToken(email, services.config),
+                capacity: Math.min(ALPHA_HARD_ACCOUNT_CAP, services.config.DEPLOYMENT_ACCOUNT_CAP),
+              },
             );
+          }
+          if (services.config.NODE_ENV === 'production' && !adminEmails.has(email)) {
+            if (!(await alphaOperationsReady(tx, services.config))) {
+              throw new ApiError(
+                503,
+                'ALPHA_ADMISSION_PAUSED',
+                'New alpha accounts are paused while safety coverage is prepared. You can join the waitlist.',
+                { waitlistToken: await waitlistToken(email, services.config) },
+              );
+            }
           }
           if (accountsFromIp >= services.config.ACCOUNT_CREATION_PER_IP_PER_DAY) {
             throw new ApiError(

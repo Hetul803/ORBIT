@@ -5,6 +5,7 @@ import { Linking } from 'react-native';
 import { Button, Card, OrbitText, Pill, Ring, Screen } from '@orbit/ui';
 
 import { api } from '@/api';
+import { useGoogleReconnectPrompt } from '@/google-reconnect';
 import { AppHeader, ErrorText, Notice, QueryError, RowLink } from '@/components';
 
 interface Connection {
@@ -17,6 +18,7 @@ interface Connection {
   syncProcessed: number;
   syncTotal: number | null;
   syncStartedAt: string | null;
+  expiredAt: string | null;
 }
 
 interface GmailStatus {
@@ -42,6 +44,12 @@ export default function Connections(): ReactNode {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const handledCallback = useRef<string | null>(null);
+  useGoogleReconnectPrompt(
+    'connections',
+    gmail.data?.reconnectRequired === true,
+    gmail.data?.connection?.expiredAt,
+    gmail.dataUpdatedAt,
+  );
 
   const refresh = useCallback(async (): Promise<void> => {
     await Promise.all([query.refetch(), gmail.refetch()]);

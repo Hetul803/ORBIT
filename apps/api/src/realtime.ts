@@ -21,6 +21,11 @@ export class RealtimeHub {
     if (current?.size === 0) this.sockets.delete(userId);
   }
 
+  public closeUser(userId: string): void {
+    for (const socket of this.sockets.get(userId) ?? []) socket.close(1008, 'Account unavailable');
+    this.sockets.delete(userId);
+  }
+
   public publish(userId: string, event: Omit<OrbitEvent, 'at'>): void {
     const encoded = JSON.stringify({ ...event, at: new Date().toISOString() });
     for (const socket of this.sockets.get(userId) ?? []) {

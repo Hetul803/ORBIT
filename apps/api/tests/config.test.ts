@@ -15,6 +15,8 @@ const productionEnvironment = (): NodeJS.ProcessEnv => ({
   ALLOW_DEVELOPMENT_SEED: 'false',
   RESEND_API_KEY: 'server-only-resend-key',
   RESEND_FROM_EMAIL: 'ORBIT <sign-in@orbit.test>',
+  MODERATION_OPERATOR_EMAILS: 'operator@orbit.test',
+  SUPPORT_EMAIL: 'support@orbit.test',
   PHONE_OTP_PROVIDER: 'disabled',
   FIELD_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
   EXPORT_SIGNING_SECRET: 'c'.repeat(48),
@@ -36,11 +38,40 @@ describe('API production configuration', () => {
     ['SENTRY_DSN', { SENTRY_DSN: '' }],
     ['LLM_DEFAULT_PROVIDER', { LLM_DEFAULT_PROVIDER: 'stub' }],
     ['TRUSTED_PROXY_CIDRS', { TRUSTED_PROXY_CIDRS: '0.0.0.0/0' }],
+    ['MODERATION_OPERATOR_EMAILS', { MODERATION_OPERATOR_EMAILS: '' }],
+    ['SUPPORT_EMAIL', { SUPPORT_EMAIL: '' }],
+    ['MODERATION_COVERAGE_CONFIRMED', { PUBLIC_ALPHA_SIGNUPS_OPEN: 'true' }],
+    ['GOOGLE_CLOUD_PROJECT_ID', { GMAIL_INTEGRATION_ENABLED: 'true' }],
   ])('names %s when an unsafe production value is supplied', (name, override) => {
     expect(() => loadConfig({ ...productionEnvironment(), ...override })).toThrow(name);
   });
 
   it('allows local development without production credentials', () => {
     expect(loadConfig({ NODE_ENV: 'development' }).OTP_DELIVERY_MODE).toBe('log');
+  });
+
+  it('never allows a configured account cap above 100', () => {
+    expect(loadConfig({ NODE_ENV: 'test' }).DEPLOYMENT_ACCOUNT_CAP).toBe(100);
+    expect(() => loadConfig({ NODE_ENV: 'test', DEPLOYMENT_ACCOUNT_CAP: '101' })).toThrow();
+  });
+
+  it('requires named Google testers until verification is actually complete', () => {
+    const google = {
+      ...productionEnvironment(),
+      GMAIL_INTEGRATION_ENABLED: 'true',
+      GOOGLE_CLOUD_PROJECT_ID: 'fresh-orbit-project',
+      GOOGLE_OAUTH_CLIENT_ID: 'orbit-only-client',
+      GOOGLE_OAUTH_CLIENT_SECRET: 'test-server-secret',
+      GOOGLE_OAUTH_REDIRECT_URI: 'https://api.orbit.test/v1/connections/gmail/callback',
+    };
+    expect(() => loadConfig(google)).toThrow('GOOGLE_TEST_USER_EMAILS');
+    expect(
+      loadConfig({ ...google, GOOGLE_TEST_USER_EMAILS: 'founder@orbit.test' })
+        .GOOGLE_OAUTH_VERIFICATION_STATUS,
+    ).toBe('testing');
+    expect(
+      loadConfig({ ...google, GOOGLE_OAUTH_VERIFICATION_STATUS: 'verified' })
+        .GOOGLE_TEST_USER_EMAILS,
+    ).toBe('');
   });
 });
