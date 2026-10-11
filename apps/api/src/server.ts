@@ -10,7 +10,9 @@ if (config.SENTRY_DSN !== undefined) {
   Sentry.init({
     dsn: config.SENTRY_DSN,
     environment: config.SENTRY_ENVIRONMENT,
-    tracesSampleRate: 0.1,
+    // Founder alpha uses error monitoring only; no paid performance sampling.
+    tracesSampleRate: 0,
+    traceLifecycle: 'static',
     beforeBreadcrumb: () => null,
     beforeSend: scrubTelemetryEvent,
     beforeSendTransaction: scrubTelemetryEvent,

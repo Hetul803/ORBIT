@@ -35,7 +35,8 @@ Sentry.init({
     process.env.EXPO_PUBLIC_SENTRY_DSN !== undefined &&
     process.env.EXPO_PUBLIC_SENTRY_DSN.length > 0,
   environment: process.env.NODE_ENV,
-  tracesSampleRate: 0.1,
+  // Keep the budgeted alpha error-only: no performance or replay collection.
+  tracesSampleRate: 0,
   sendDefaultPii: false,
   beforeBreadcrumb: () => null,
   beforeSend: scrubTelemetryEvent,
