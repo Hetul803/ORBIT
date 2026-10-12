@@ -13,3 +13,10 @@ packages/db/src/generated/
 tmp/
 artifacts/
 .DS_Store
+credentials.json
+*.jks
+*.keystore
+*.p12
+*.mobileprovision
+*.pem
+*.key

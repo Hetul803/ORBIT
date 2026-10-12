@@ -14,6 +14,16 @@ test('EAS upload retains every Git exclusion and excludes local evidence/signing
   for (const pattern of gitIgnored) assert.ok(ignored.includes(pattern), pattern);
   for (const pattern of ['docs/', '.git/', 'credentials.json', '*.jks', '*.p12', '*.key'])
     assert.ok(ignored.includes(pattern), pattern);
+  for (const pattern of [
+    'credentials.json',
+    '*.jks',
+    '*.keystore',
+    '*.p12',
+    '*.mobileprovision',
+    '*.pem',
+    '*.key',
+  ])
+    assert.ok(gitIgnored.includes(pattern), `Git must also exclude ${pattern}`);
 });
 
 test('cloud mobile hook builds the shared dependency and Metro enables debug IDs without replay', () => {
