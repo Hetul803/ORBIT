@@ -15,6 +15,7 @@
     "preweb": "pnpm --filter @orbit/shared build",
     "web": "expo start --web",
     "prebuild": "pnpm --filter @orbit/shared build",
+    "eas-build-post-install": "pnpm --filter @orbit/shared build",
     "build": "expo export --platform web --output-dir dist",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint app src --max-warnings=0",
