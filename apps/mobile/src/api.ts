@@ -18,6 +18,11 @@ import { setApiTransport } from './transport';
 export { resolveApiUrl } from './api-url';
 
 const developmentHost = Constants.expoConfig?.hostUri ?? Constants.expoGoConfig?.debuggerHost;
+// React Native defines window, but it does not provide a browser Location object.
+// This module loads before the root layout/error monitor, so native startup must
+// never inspect DOM globals even when an explicit production API URL is set.
+const webHost =
+  Platform.OS === 'web' && typeof window !== 'undefined' ? window.location.hostname : undefined;
 
 export const configuredApiUrl = resolveApiUrl({
   ...(process.env.EXPO_PUBLIC_API_URL === undefined
@@ -26,7 +31,7 @@ export const configuredApiUrl = resolveApiUrl({
   platform: Platform.OS,
   physicalDevice: Device.isDevice,
   ...(developmentHost === undefined ? {} : { developmentHost }),
-  ...(typeof window === 'undefined' ? {} : { webHost: window.location.hostname }),
+  ...(webHost === undefined ? {} : { webHost }),
   production: process.env.NODE_ENV === 'production',
 });
 
