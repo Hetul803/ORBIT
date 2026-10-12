@@ -27,3 +27,4 @@ GoogleService-Info.plist
 *.mobileprovision
 *.pem
 *.key
+*.p8

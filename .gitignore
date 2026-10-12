@@ -20,3 +20,4 @@ credentials.json
 *.mobileprovision
 *.pem
 *.key
+*.p8

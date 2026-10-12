@@ -2,13 +2,15 @@
 
 Prepared October 9, 2026; contact/owned-domain status updated October 11. This packet is for later submission; neither store has been submitted.
 
-October 12: iOS signing is configured and its first IPA built successfully; signature, identity/profile and targeted bundle checks pass. Apple rejected the exact store display name ORBIT as already in use; a founder-approved alternative is pending, so the record is not created. Personal Play registration is complete, but identity/device/phone checks still block app creation. Public submission waits for verified Google access and all remaining release checks. See [current evidence](STORE_RELEASE_AND_AGENT_READINESS.md); older packet values below are proposed metadata, not provider completion receipts.
+October 12: iOS signing is configured and its first IPA built successfully; signature, identity/profile and targeted bundle checks pass. After the exact ORBIT name was rejected, the founder approved **ORBIT: Private Companion** and Apple created dedicated app record **6821827369**, in draft Prepare for Submission status. The Developer upload key is approved but not generated: Apple's separate API-access agreement awaits founder review/acceptance. TestFlight is empty; no upload or public submission has occurred. Personal Play registration is complete, but identity is under review and Android-device/phone checks still block app creation. A trusted borrowed non-rooted Android 10+ phone can meet the device requirement using the founder's own account. Public submission waits for verified Google access and all remaining release checks. See [current evidence](STORE_RELEASE_AND_AGENT_READINESS.md); other packet values below are proposed metadata, not provider completion receipts.
 
 ## Product identity
 
 | Field                                    | Value                                                                                                         |
 | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| App name                                 | **ORBIT**                                                                                                     |
+| App Store listing name                   | **ORBIT: Private Companion**; founder-approved and record created                                             |
+| App Store Connect Apple ID               | `6821827369`; dedicated ORBIT record, no build uploaded                                                       |
+| App icon label                           | **ORBIT**; unchanged                                                                                          |
 | iOS bundle ID / Android package          | `com.orbit.companion`                                                                                         |
 | Version                                  | `0.1.0`                                                                                                       |
 | Initial iOS build / Android version code | `1` / `1`; EAS production uses remote auto-increment after the first build                                    |
