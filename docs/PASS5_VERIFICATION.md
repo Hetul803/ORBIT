@@ -1,5 +1,7 @@
 # ORBIT Pass 5 verification and handoff
 
+Latest October 12, 13:05 Chicago checkpoint: founder confirmed actual Google connection (partial sync failed) and successful iPhone personal-agent replies after scoped key replacement. New chat/categorized inbox/server-owned resumable sync are local/tested, **not yet deployed or published**. Latest fresh isolated suite: **194 passing, zero failures/skips**; root lint/typecheck pass. Migration 17 is local only; public signup/staffing stay closed, Google stays Testing. [Current detailed evidence](GMAIL_SYNC_CHAT_20261012.md) supersedes older expired-key/pending-consent claims below without changing historical results.
+
 Current October 12 founder-feedback checkpoint: the founder confirmed corrected iPhone launch/sign-in/use; API/worker repair 3b37c47 and matching iOS update are live with verified artifact delivery. Full suite now **181 passing, zero failures/skips**. Founder-only Google Testing phone client is configured, not publicly verified; newest phone consent/sync and actual live chat remain open (local OpenRouter key expired). Public admission/staffing stay closed. [Current detailed evidence](FOUNDER_FEEDBACK_20261012.md) supersedes older pending-install/disabled-Google states below without changing their historical results.
 
 ## October 12, 05:04 Chicago native crash repair

@@ -6,6 +6,7 @@ import { Button, Card, OrbitText, Pill, Ring, Screen } from '@orbit/ui';
 
 import { api } from '@/api';
 import { useGoogleReconnectPrompt } from '@/google-reconnect';
+import { googleSyncActive, useGoogleStatus } from '@/google-sync';
 import { AppHeader, ErrorText, Notice, QueryError, RowLink } from '@/components';
 
 interface Connection {
@@ -21,24 +22,13 @@ interface Connection {
   expiredAt: string | null;
 }
 
-interface GmailStatus {
-  available: boolean;
-  unavailableReason: string | null;
-  connected: boolean;
-  reconnectRequired: boolean;
-  connection: Connection | null;
-}
-
 export default function Connections(): ReactNode {
   const client = useQueryClient();
   const query = useQuery({
     queryKey: ['connections'],
     queryFn: () => api<Connection[]>('/v1/connections'),
   });
-  const gmail = useQuery({
-    queryKey: ['gmail-status'],
-    queryFn: () => api<GmailStatus>('/v1/connections/gmail/status'),
-  });
+  const gmail = useGoogleStatus();
   const [busy, setBusy] = useState(false);
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -58,17 +48,11 @@ export default function Connections(): ReactNode {
   const sync = useCallback(async (): Promise<void> => {
     setBusy(true);
     setError(null);
-    setMessage('Starting Google sync. Reading authorization status…');
-    const progressTimer = setInterval(() => void gmail.refetch(), 1_500);
+    setMessage('Starting background sync…');
     try {
-      const result = await api<{
-        imported: number;
-        examined: number;
-        calendarImported: number;
-        caught: number;
-      }>('/v1/connections/gmail/sync', { method: 'POST' });
+      await api('/v1/connections/gmail/sync', { method: 'POST' });
       setMessage(
-        `Read ${String(result.examined)} Gmail messages from the last 90 days, added ${String(result.imported)} new mail records and ${String(result.calendarImported)} calendar events, and found ${String(result.caught)} Catch items.`,
+        'Sync is running on ORBIT’s server. You can change screens or close the app. Your inbox and Catch will populate as batches finish.',
       );
       await Promise.all([
         client.invalidateQueries({ queryKey: ['inbox'] }),
@@ -78,7 +62,6 @@ export default function Connections(): ReactNode {
     } catch (caught: unknown) {
       setError(caught instanceof Error ? caught.message : 'Could not sync Gmail.');
     } finally {
-      clearInterval(progressTimer);
       setBusy(false);
     }
   }, [client, gmail, refresh]);
@@ -197,7 +180,7 @@ export default function Connections(): ReactNode {
               {gmail.data.connection?.syncStatus === 'error' ? (
                 <Notice
                   title="Last sync stopped"
-                  detail="Nothing new was marked current. Check your network, then tap Sync Gmail + Calendar to retry. If Google access expired, reconnect it first."
+                  detail={`Completed batches are saved. ${gmail.data.connection.syncErrorCode === 'GOOGLE_PERMISSION_REQUIRED' ? 'Google refused a read. Check your granted permissions and reconnect.' : 'Tap Sync to resume from the saved checkpoint. Reconnect first if Google access expired.'}`}
                   tone="ember"
                 />
               ) : gmail.data.connection === null ||
@@ -218,18 +201,34 @@ export default function Connections(): ReactNode {
                   <OrbitText variant="label">
                     {gmail.data.connection.syncStatus === 'authorizing'
                       ? 'Checking encrypted Google access…'
-                      : gmail.data.connection.syncStatus === 'reading_mail'
-                        ? `Reading message metadata ${String(gmail.data.connection.syncProcessed)}/${String(gmail.data.connection.syncTotal ?? '?')}…`
-                        : gmail.data.connection.syncStatus === 'reading_calendar'
-                          ? 'Reading the next 14 days of Calendar…'
-                          : 'Building source-backed Catch items…'}
+                      : gmail.data.connection.syncStatus === 'queued'
+                        ? 'Queued securely on ORBIT’s server…'
+                        : gmail.data.connection.syncStatus === 'retrying'
+                          ? 'Google temporarily refused a read. Retrying the saved batch…'
+                          : gmail.data.connection.syncStatus === 'reading_mail'
+                            ? `Reading message metadata ${String(gmail.data.connection.syncProcessed)}/${String(gmail.data.connection.syncTotal ?? '?')}…`
+                            : gmail.data.connection.syncStatus === 'reading_calendar'
+                              ? 'Reading the next 14 days of Calendar…'
+                              : 'Building source-backed Catch items…'}
                   </OrbitText>
                   <OrbitText variant="caption">
-                    A first sync can take several minutes for an active inbox. Keep ORBIT open.
+                    You can leave this screen or close ORBIT. Reads continue on the server: up to
+                    2,500 messages from the last 90 days, plus the next 14 days of Calendar. Partial
+                    results appear as they are ready.
                   </OrbitText>
                 </Card>
               )}
-              <Button label="Sync Gmail + Calendar" onPress={() => void sync()} loading={busy} />
+              <Button
+                label="Sync Gmail + Calendar"
+                onPress={() => void sync()}
+                loading={busy}
+                disabled={googleSyncActive(gmail.data.connection?.syncStatus)}
+              />
+              <Button
+                label="Open categorized inbox"
+                kind="secondary"
+                onPress={() => router.push('/mail')}
+              />
               {confirmDisconnect ? (
                 <>
                   <OrbitText variant="label">

@@ -13,6 +13,8 @@ import { loadConfig } from '../../src/config.js';
 import { issueTokens } from '../../src/auth.js';
 import { sha256, encryptField } from '../../src/crypto.js';
 import { alphaOperationsReady } from '../../src/alpha-operations.js';
+import { createServices } from '../../src/services.js';
+import { runGoogleSyncTick } from '../../src/google-sync.js';
 
 const databaseUrl = process.env.ALPHA_TEST_DATABASE_URL;
 const enabled = databaseUrl?.includes('orbit_test') === true;
@@ -426,28 +428,38 @@ describe.runIf(enabled)('public-alpha safety (isolated database, mocked external
         scopes: [],
       },
     });
-    const googleApp = await buildApp(db, {
+    const googleConfig = {
       ...config,
-      GMAIL_INTEGRATION_ENABLED: 'true',
+      GMAIL_INTEGRATION_ENABLED: 'true' as const,
       GOOGLE_OAUTH_CLIENT_ID: 'test-client',
       GOOGLE_OAUTH_CLIENT_SECRET: 'test-secret',
       GOOGLE_CLOUD_PROJECT_ID: 'new-orbit-alpha-test',
       GOOGLE_OAUTH_REDIRECT_URI: 'https://api.orbit.test/v1/connections/gmail/callback',
-    });
+    };
+    const googleApp = await buildApp(db, googleConfig);
     await googleApp.ready();
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 400 }),
     );
-    for (let n = 0; n < 2; n++)
-      expect(
-        (
-          await googleApp.inject({
-            method: 'POST',
-            url: '/v1/connections/gmail/sync',
-            headers: { authorization: `Bearer ${owner.token}` },
-          })
-        ).statusCode,
-      ).toBe(409);
+    expect(
+      (
+        await googleApp.inject({
+          method: 'POST',
+          url: '/v1/connections/gmail/sync',
+          headers: { authorization: `Bearer ${owner.token}` },
+        })
+      ).statusCode,
+    ).toBe(202);
+    await runGoogleSyncTick(createServices(db, googleConfig));
+    expect(
+      (
+        await googleApp.inject({
+          method: 'POST',
+          url: '/v1/connections/gmail/sync',
+          headers: { authorization: `Bearer ${owner.token}` },
+        })
+      ).statusCode,
+    ).toBe(409);
     const expired = await db.connection.findUniqueOrThrow({ where: { id: connection.id } });
     expect(expired.status).toBe('EXPIRED');
     expect(expired.expiredAt).not.toBeNull();

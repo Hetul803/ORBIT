@@ -11,7 +11,7 @@ const enabled = (preferences: unknown, eventType: PushEventType): boolean => {
 };
 
 export const queuePush = async (
-  db: PrismaClient,
+  db: Pick<PrismaClient, 'device' | 'pushDelivery'>,
   input: {
     userId: string;
     eventType: PushEventType;

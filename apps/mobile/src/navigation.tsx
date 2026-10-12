@@ -18,7 +18,7 @@ export const mainDestination = (pathname: string): (typeof destinations)[number]
   if (/^\/(?:skills|skill|groups|group|watchers|watcher|run)(?:\/|$)/u.test(pathname))
     return '/skills';
   if (
-    /^\/(?:you|settings|connections|memory|voice|trust|safety|verification|admin)(?:\/|$)/u.test(
+    /^\/(?:you|settings|connections|mail|memory|voice|trust|safety|verification|admin)(?:\/|$)/u.test(
       pathname,
     )
   )

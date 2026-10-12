@@ -20,6 +20,7 @@ import { registerAuthRoutes } from './routes/auth.js';
 import { registerAdmissionRoutes } from './routes/admission.js';
 import { registerCoreRoutes } from './routes/core.js';
 import { registerGmailRoutes } from './routes/gmail.js';
+import { registerGoogleSyncRunner } from './google-sync.js';
 import { registerLegalRoutes } from './routes/legal.js';
 import { registerLifeRoutes } from './routes/life.js';
 import { registerPushRoutes } from './routes/push.js';
@@ -168,6 +169,7 @@ export const buildApp = async (db: PrismaClient, config: ApiConfig): Promise<Fas
   registerProfileRoutes(app, services);
   registerProactiveRoutes(app, services);
   registerGmailRoutes(app, services);
+  registerGoogleSyncRunner(app, services);
   registerLifeRoutes(app, services);
   registerPushRoutes(app, services);
   registerSocialRoutes(app, services);

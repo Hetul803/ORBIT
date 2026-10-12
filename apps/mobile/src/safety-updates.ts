@@ -37,8 +37,18 @@ export const subscribeSafetyUpdates = (accessToken: string, apiUrl: string): (()
     );
     socket.onmessage = (event): void => {
       try {
-        if ((JSON.parse(String(event.data)) as { type?: string }).type === 'safety.suppressed')
-          void refreshSafetySurfaces().catch(() => undefined);
+        const type = (JSON.parse(String(event.data)) as { type?: string }).type;
+        if (type === 'safety.suppressed') void refreshSafetySurfaces().catch(() => undefined);
+        if (type === 'google.sync_progress') {
+          for (const key of [
+            ['gmail-status'],
+            ['mail'],
+            ['inbox'],
+            ['life', 'catch'],
+            ['brief', 'today'],
+          ])
+            void queryClient.invalidateQueries({ queryKey: key });
+        }
       } catch {
         /* Never log stream payloads. */
       }

@@ -27,6 +27,7 @@ import { configuredApiUrl } from '@/api';
 import { clearSocialOfflineCache } from '@/offline';
 import { subscribeSafetyUpdates } from '@/safety-updates';
 import { MainNavigation } from '@/navigation';
+import { GoogleSyncObserver } from '@/google-sync';
 
 void SplashScreen.preventAutoHideAsync();
 
@@ -93,6 +94,7 @@ function RootLayout(): ReactNode {
   if (!fontsLoaded || !hydrated || !routeAllowed) return null;
   return (
     <QueryClientProvider client={queryClient}>
+      {accessToken !== null ? <GoogleSyncObserver /> : null}
       <View style={styles.flex}>
         <StatusBar style={dark ? 'light' : 'dark'} />
         {!reachable ? (

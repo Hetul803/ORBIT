@@ -1,5 +1,13 @@
 # API guide
 
+## October 12 durable-sync contract (local/tested, not deployed yet)
+
+`POST /v1/connections/gmail/sync` now queues a server-owned job and returns **202** `{ok, runId, alreadyRunning, background:true, daysRead:90, maxMessages:2500}`, not a completed sync result. The owner status route includes run, retry and safe-error fields. Successful OAuth callback queues first sync before phone redirect. Additive migration 17 must precede deployment. The API-hosted runner checkpoints each message, handles provider retries and continues without the mobile screen; it does not send Gmail to the model for background Catch extraction.
+
+New authenticated owner-only `GET /v1/mail?category=important` validates category, returns Gmail-label-derived counts and the newest 100 matching headers/source links within the bounded synced set. Categories: important, spam, promotions, social, updates, sent, other; omit category for All. No Google label writes or new scopes. `google.sync_progress` is an empty-payload advisory invalidation. Existing `/v1/agent/chat` and `/v1/life/ask` power separate contexts in the new conversation UI; account lookup results are not added to personal-model history. [Complete contracts/tests/release state](GMAIL_SYNC_CHAT_20261012.md).
+
+The founder has now confirmed Google consent/partial import and successful native personal-chat replies after the scoped OpenRouter key replacement. Older expired-key assertions below are historical. New UI/durable sync are not yet production features.
+
 The API listens on port 4100 by default. Authenticated routes require `Authorization: Bearer <accessToken>`; errors use `{ "error": { "code", "message", "requestId", "details?" } }`. Public exceptions include OTP request/verify/refresh, alpha status, purpose-token waitlist join/remove, the single-use-state Google callback, and safety-plan share. Waitlist tokens are not access tokens.
 
 ## Public-alpha safety and admission (October 11)

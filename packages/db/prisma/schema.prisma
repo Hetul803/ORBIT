@@ -841,6 +841,13 @@ model Connection {
   syncProcessed       Int                @default(0)
   syncTotal           Int?
   syncStartedAt       DateTime?
+  syncRunId           String?
+  syncState           Json?
+  syncLeaseToken      String?
+  syncLeaseUntil      DateTime?
+  syncNextAttemptAt   DateTime?
+  syncAttempts        Int                @default(0)
+  syncErrorCode       String?
   expiredAt           DateTime?
   reconnectPromptedAt DateTime?
   user                User               @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -848,6 +855,7 @@ model Connection {
   @@unique([userId, provider])
   @@index([userId])
   @@index([status])
+  @@index([syncStatus, syncNextAttemptAt])
 }
 
 model ModelBudgetReservation {

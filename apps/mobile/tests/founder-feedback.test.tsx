@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactElement, ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 const apiMock = vi.hoisted(() => vi.fn());
@@ -10,6 +10,11 @@ vi.mock('@/api', () => ({
   patchBody: (value: unknown) => ({ method: 'PATCH', body: JSON.stringify(value) }),
 }));
 vi.mock('expo-clipboard', () => ({ setStringAsync: vi.fn(async () => undefined) }));
+vi.mock('expo-secure-store', () => ({
+  getItemAsync: vi.fn(),
+  setItemAsync: vi.fn(),
+  deleteItemAsync: vi.fn(),
+}));
 vi.mock('expo-document-picker', () => ({
   getDocumentAsync: documentPickerMock,
 }));
@@ -46,6 +51,7 @@ import Intents from '../app/intents';
 import Groups from '../app/groups';
 import Voice from '../app/voice';
 import Ask from '../app/(tabs)/ask';
+import { clearChatSession, resetChatOwner, useChatSession } from '../src/chat-session';
 
 const renderQuery = (element: ReactElement): void => {
   const client = new QueryClient({
@@ -57,6 +63,7 @@ const renderQuery = (element: ReactElement): void => {
 describe('founder feedback journeys', () => {
   beforeEach(() => {
     apiMock.mockReset();
+    clearChatSession();
     documentPickerMock.mockReset();
     documentPickerMock.mockResolvedValue({ canceled: true });
   });
@@ -150,12 +157,12 @@ describe('founder feedback journeys', () => {
     apiMock.mockResolvedValue({
       answer: 'Let’s protect one quiet morning and leave Saturday open.',
     });
-    render(<Ask />);
+    renderQuery(<Ask />);
     fireEvent.change(screen.getByLabelText('Message your agent'), {
       target: { value: 'Help me plan my week.' },
     });
     expect(screen.getByRole('button', { name: 'Send to my agent' })).toBeDisabled();
-    expect(apiMock).not.toHaveBeenCalled();
+    expect(apiMock.mock.calls.filter(([path]) => path === '/v1/agent/chat')).toHaveLength(0);
     fireEvent.click(screen.getByRole('button', { name: 'Allow my context for this chat' }));
     fireEvent.click(screen.getByRole('button', { name: 'Send to my agent' }));
     expect(
@@ -219,5 +226,66 @@ describe('founder feedback journeys', () => {
       'Coffee Saturday?',
       'Reach me at [email].',
     ]);
+  });
+  it('keeps the conversation/composer across screen remounts and never leaks mailbox answers into model history', async () => {
+    apiMock.mockImplementation(async (path: string) =>
+      path === '/v1/agent'
+        ? { name: 'Morrow' }
+        : path === '/v1/life/ask'
+          ? { answer: 'PRIVATE FAKE MAIL RESULT', sources: [] }
+          : { answer: 'A useful personal reply.' },
+    );
+    const view = render(
+      <QueryClientProvider
+        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+      >
+        <Ask />
+      </QueryClientProvider>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Mail & Calendar' }));
+    fireEvent.change(screen.getByLabelText('Message your agent'), {
+      target: { value: 'What am I forgetting today?' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send to my agent' }));
+    await screen.findByText('PRIVATE FAKE MAIL RESULT');
+    view.unmount();
+    renderQuery(<Ask />);
+    expect(screen.getByText('PRIVATE FAKE MAIL RESULT')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'My agent' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Allow my context for this chat' }));
+    fireEvent.change(screen.getByLabelText('Message your agent'), {
+      target: { value: 'Help me think about my day.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send to my agent' }));
+    await screen.findByText('A useful personal reply.');
+    const calls = apiMock.mock.calls.filter(([path]) => path === '/v1/agent/chat');
+    expect(JSON.parse(calls[0]?.[1].body ?? '{}').history).toEqual([]);
+    expect(JSON.stringify(calls)).not.toContain('PRIVATE FAKE MAIL RESULT');
+  });
+  it('shows a pending user bubble immediately, preserves failed input, and drops late replies after an owner reset', async () => {
+    let resolveReply: (value: unknown) => void = () => undefined;
+    apiMock.mockImplementation(async (path: string) =>
+      path === '/v1/agent'
+        ? { name: 'Morrow' }
+        : new Promise((resolve) => {
+            resolveReply = resolve;
+          }),
+    );
+    renderQuery(<Ask />);
+    fireEvent.click(screen.getByRole('button', { name: 'Allow my context for this chat' }));
+    fireEvent.change(screen.getByLabelText('Message your agent'), {
+      target: { value: 'Let’s make a plan.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send to my agent' }));
+    expect(screen.getByText('Let’s make a plan.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Send to my agent' })).toBeDisabled();
+    await act(async () => {
+      resetChatOwner('different-owner');
+      resolveReply({ answer: 'Old owner private reply' });
+      await Promise.resolve();
+    });
+    expect(useChatSession.getState().turns).toEqual([]);
+    expect(screen.queryByText('Old owner private reply')).not.toBeInTheDocument();
+    act(() => resetChatOwner(null));
   });
 });

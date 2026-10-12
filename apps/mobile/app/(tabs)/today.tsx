@@ -19,6 +19,7 @@ import {
 } from '@orbit/ui';
 
 import { api } from '@/api';
+import { googleSyncActive, useGoogleStatus } from '@/google-sync';
 import { AppHeader, EmptyState, Metric, QueryError } from '@/components';
 import type { BriefItem, CurrentUser, DailyBrief } from '@/types';
 import type { LifeItem } from '@/types';
@@ -73,10 +74,7 @@ export default function Today(): ReactNode {
     queryKey: ['agent'],
     queryFn: () => api<{ name: string; identitySeed: string }>('/v1/agent'),
   });
-  const google = useQuery({
-    queryKey: ['gmail-status'],
-    queryFn: () => api<{ available: boolean; connected: boolean }>('/v1/connections/gmail/status'),
-  });
+  const google = useGoogleStatus();
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
   return (
@@ -138,7 +136,9 @@ export default function Today(): ReactNode {
               </OrbitText>
               <OrbitText>
                 {google.data?.connected
-                  ? 'Open your email and calendar connection to check sync status.'
+                  ? googleSyncActive(google.data.connection?.syncStatus)
+                    ? `Your inbox is arriving: ${String(google.data.connection?.syncProcessed ?? 0)} messages checked. You can keep using ORBIT while sync continues.`
+                    : 'Your read-only inbox is ready to explore. Open a category or ask your agent about your sources.'
                   : google.data?.available
                     ? 'Connect Gmail and Calendar to surface real follow-ups and conflicts.'
                     : 'Gmail and Calendar are coming after Google verification. Your agent can still work with the context you teach it.'}
@@ -148,6 +148,13 @@ export default function Today(): ReactNode {
                 kind="secondary"
                 onPress={() => router.push('/connections')}
               />
+              {google.data?.connected ? (
+                <Button
+                  label="Explore my inbox"
+                  onPress={() => router.push('/mail')}
+                  kind="secondary"
+                />
+              ) : null}
             </Card>
             {brief === undefined || query.isError ? null : (
               <Card tone="yours" style={styles.summary}>

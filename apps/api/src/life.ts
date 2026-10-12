@@ -79,6 +79,11 @@ const lifeItemCandidate = (
   sourceByThread: ReadonlyMap<string, readonly SourceDocumentView[]>,
   now: Date,
 ): ProposedLifeItem | null => {
+  const labels =
+    typeof source.metadata === 'object' && source.metadata !== null
+      ? (source.metadata as { labels?: unknown }).labels
+      : undefined;
+  if (Array.isArray(labels) && (labels.includes('SPAM') || labels.includes('TRASH'))) return null;
   const thread = sourceByThread.get(threadKey(source)) ?? [source];
   const ordered = [...thread].sort(
     (left, right) => (left.occurredAt?.getTime() ?? 0) - (right.occurredAt?.getTime() ?? 0),
@@ -234,6 +239,7 @@ export const refreshLifeItems = async (
   services: Services,
   userId: string,
   requestId?: string,
+  generateDrafts = true,
 ): Promise<number> => {
   const sources = (await services.db.sourceDocument.findMany({
     where: { userId, deletedAt: null },
@@ -272,7 +278,7 @@ export const refreshLifeItems = async (
   );
   for (const item of proposed) {
     const draft =
-      item.draftForSource === undefined
+      !generateDrafts || item.draftForSource === undefined
         ? null
         : await draftFor(services, userId, item.draftForSource, requestId);
     await services.db.lifeItem.upsert({
