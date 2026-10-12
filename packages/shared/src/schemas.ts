@@ -41,8 +41,9 @@ export const otpRequestSchema = z.object({
 export const otpVerifySchema = z.object({
   email: z.email(),
   code: z.string().regex(/^\d{6}$/),
-  dateOfBirth: z.iso.date(),
-  displayName: z.string().trim().min(1).max(80),
+  dateOfBirth: z.iso.date().optional(),
+  displayName: z.string().trim().min(1).max(80).optional(),
+  mode: z.enum(['sign_in', 'sign_up']).optional(),
 });
 
 export const refreshTokenSchema = z.object({
@@ -73,11 +74,11 @@ export const verifyPhoneSchema = z.object({
 export const verifyPhoneRequestSchema = verifyPhoneSchema.pick({ phone: true });
 
 export const voiceProfileSchema = z.object({
-  tone: z.array(z.string()).default([]),
-  sentenceStyle: z.string().default('direct and natural'),
-  vocabulary: z.array(z.string()).default([]),
-  avoids: z.array(z.string()).default([]),
-  examples: z.array(z.string()).max(12).default([]),
+  tone: z.array(z.string().max(200)).max(12).default([]),
+  sentenceStyle: z.string().max(1000).default('direct and natural'),
+  vocabulary: z.array(z.string().max(200)).max(50).default([]),
+  avoids: z.array(z.string().max(1000)).max(12).default([]),
+  examples: z.array(z.string().max(1000)).max(12).default([]),
 });
 
 export const agentSchema = z.object({
@@ -98,6 +99,8 @@ export const createAgentSchema = z.object({
 
 export const updateAgentSchema = createAgentSchema.partial().extend({
   autonomyDefaults: z.record(z.string(), trustModeSchema).optional(),
+  voiceProfile: voiceProfileSchema.optional(),
+  confirmVoiceProfile: z.boolean().optional(),
 });
 
 export const interviewTurnSchema = z.object({
@@ -436,6 +439,11 @@ export const groupSchema = z.object({
 
 export const joinGroupSchema = z.object({
   code: z.string().trim().min(4).max(32),
+});
+
+export const createGroupSchema = z.object({
+  name: z.string().trim().min(2).max(80),
+  kind: z.enum(['club', 'class', 'lab']).default('club'),
 });
 
 export const blockSchema = z.object({

@@ -16,5 +16,8 @@ describe('offline transport contract', () => {
     expect(isOfflineQueueable('/v1/proactive/record-123/respond', 'POST')).toBe(true);
     expect(isOfflineQueueable('/v1/inbox/record-123/approve', 'POST')).toBe(false);
     expect(isOfflineQueueable('/v1/connections/google/calendar', 'POST')).toBe(false);
+    expect(isOfflineQueueable('/v1/agent/chat', 'POST')).toBe(false);
+    expect(isOfflineQueueable('/v1/agent', 'PATCH')).toBe(false);
+    expect(isOfflineQueueable('/v1/groups', 'POST')).toBe(false);
   });
 });

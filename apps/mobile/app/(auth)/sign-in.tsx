@@ -22,6 +22,7 @@ interface OtpVerifyResponse {
 export default function SignIn(): ReactNode {
   const setTokens = useAuthStore((state) => state.setTokens);
   const [step, setStep] = useState<'email' | 'code'>('email');
+  const [mode, setMode] = useState<'sign_up' | 'sign_in'>('sign_up');
   const [email, setEmail] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [dateOfBirth, setDateOfBirth] = useState('');
@@ -99,7 +100,12 @@ export default function SignIn(): ReactNode {
     try {
       const result = await api<OtpVerifyResponse>(
         '/v1/auth/otp/verify',
-        jsonBody({ email, code, dateOfBirth, displayName }),
+        jsonBody({
+          email,
+          code,
+          mode,
+          ...(mode === 'sign_up' ? { dateOfBirth, displayName } : {}),
+        }),
       );
       await setTokens(result.accessToken, result.refreshToken);
       router.replace(result.hasAgent ? '/today' : '/agent');
@@ -143,9 +149,29 @@ export default function SignIn(): ReactNode {
           </OrbitText>
         </View>
         <Card>
+          <View style={styles.modes}>
+            <Button
+              label="Create account"
+              kind={mode === 'sign_up' ? 'primary' : 'secondary'}
+              onPress={() => {
+                setMode('sign_up');
+                setError(null);
+              }}
+            />
+            <Button
+              label="Sign in"
+              kind={mode === 'sign_in' ? 'primary' : 'secondary'}
+              onPress={() => {
+                setMode('sign_in');
+                setError(null);
+              }}
+            />
+          </View>
           {step === 'email' ? (
             <>
-              <OrbitText variant="title">Enter your private orbit</OrbitText>
+              <OrbitText variant="title">
+                {mode === 'sign_up' ? 'Meet your personal agent' : 'Welcome back'}
+              </OrbitText>
               <Field
                 label="Email"
                 value={email}
@@ -173,27 +199,35 @@ export default function SignIn(): ReactNode {
                 maxLength={6}
                 testID="otp-input"
               />
-              <Field
-                label="What should we call you?"
-                value={displayName}
-                onChangeText={setDisplayName}
-              />
-              <Field
-                label="Date of birth"
-                value={dateOfBirth}
-                onChangeText={setDateOfBirth}
-                hint="YYYY-MM-DD · ORBIT is strictly 18+."
-              />
+              {mode === 'sign_up' ? (
+                <>
+                  <Field
+                    label="What should we call you?"
+                    value={displayName}
+                    onChangeText={setDisplayName}
+                  />
+                  <Field
+                    label="Date of birth"
+                    value={dateOfBirth}
+                    onChangeText={setDateOfBirth}
+                    hint="YYYY-MM-DD · ORBIT is strictly 18+."
+                  />
+                </>
+              ) : null}
               <Notice
                 title="Check your email"
-                detail="Use the newest six-digit code. ORBIT never displays sign-in codes inside the app."
+                detail={`We sent a code to ${email}. Use the most recent email.`}
                 tone="moss"
               />
               <Button
                 label="Continue"
                 onPress={() => void verify()}
                 loading={busy}
-                disabled={code.length !== 6 || displayName.length === 0}
+                disabled={
+                  code.length !== 6 ||
+                  (mode === 'sign_up' &&
+                    (displayName.trim().length === 0 || !/^\d{4}-\d{2}-\d{2}$/u.test(dateOfBirth)))
+                }
                 testID="verify-code"
               />
               <Button
@@ -236,4 +270,5 @@ const styles = StyleSheet.create({
   hero: { gap: spacing.lg, paddingVertical: spacing.xl },
   privacy: { textAlign: 'center' },
   legal: { flexDirection: 'row', justifyContent: 'center', gap: spacing.sm },
+  modes: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
 });

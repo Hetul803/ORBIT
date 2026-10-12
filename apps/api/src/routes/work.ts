@@ -1,4 +1,8 @@
+import { randomBytes } from 'node:crypto';
+
 import {
+  GroupKind,
+  GroupVisibility,
   GroupRole,
   InboxTriage,
   Prisma,
@@ -16,6 +20,7 @@ import {
   askInterpretationSchema,
   createSkillSchema,
   createWatcherSchema,
+  createGroupSchema,
   joinGroupSchema,
   skillCorrectionSchema,
   upsertScreeningRuleSchema,
@@ -867,23 +872,80 @@ export const registerWorkRoutes = (app: FastifyInstance, services: Services): vo
   app.get('/v1/groups', async (request) => {
     const auth = await requireAuth(request, services.config);
     const memberships = await services.db.groupMember.findMany({
-      where: { userId: auth.id, deletedAt: null },
-      include: { group: { include: { _count: { select: { members: true } } } } },
+      where: { userId: auth.id, deletedAt: null, group: { deletedAt: null } },
+      include: {
+        group: { include: { _count: { select: { members: { where: { deletedAt: null } } } } } },
+      },
     });
-    return memberships.map(({ group }) => ({
+    return memberships.map(({ group, role }) => ({
       id: group.id,
       kind: group.kind.toLowerCase(),
       name: group.name,
       visibility: group.visibility.toLowerCase(),
       memberCount: group._count.members,
+      role: role.toLowerCase(),
+      ...(role === GroupRole.OWNER ? { joinCode: group.joinCode } : {}),
       createdAt: group.createdAt.toISOString(),
     }));
+  });
+
+  app.post('/v1/groups', {
+    config: { rateLimit: { max: 5, timeWindow: '1 hour' } },
+    handler: async (request, reply) => {
+      const auth = await requireAuth(request, services.config);
+      const body = parseWith(createGroupSchema, request.body);
+      const group = await services.db.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext(${`group-create:${auth.id}`}))`;
+        const owned = await tx.groupMember.count({
+          where: {
+            userId: auth.id,
+            role: GroupRole.OWNER,
+            deletedAt: null,
+            group: { deletedAt: null },
+          },
+        });
+        if (owned >= 5)
+          throw new ApiError(
+            429,
+            'GROUP_LIMIT_REACHED',
+            'You can create up to five private groups.',
+          );
+        return tx.group.create({
+          data: {
+            name: body.name,
+            kind: { club: GroupKind.CLUB, class: GroupKind.CLASS, lab: GroupKind.LAB }[body.kind],
+            visibility: GroupVisibility.PRIVATE,
+            joinCode: randomBytes(10).toString('hex').toUpperCase(),
+            members: { create: { userId: auth.id, role: GroupRole.OWNER } },
+          },
+        });
+      });
+      await logActivity(services.db, {
+        userId: auth.id,
+        actorType: 'USER',
+        action: 'group.created',
+        targetType: 'Group',
+        targetId: group.id,
+        requestId: request.id,
+      });
+      return reply.code(201).send({
+        id: group.id,
+        name: group.name,
+        kind: body.kind,
+        visibility: 'private',
+        memberCount: 1,
+        role: 'owner',
+        joinCode: group.joinCode,
+      });
+    },
   });
 
   app.post('/v1/groups/join', async (request, reply) => {
     const auth = await requireAuth(request, services.config);
     const body = parseWith(joinGroupSchema, request.body);
-    const group = await services.db.group.findUnique({ where: { joinCode: body.code } });
+    const group = await services.db.group.findUnique({
+      where: { joinCode: body.code.toUpperCase() },
+    });
     if (group?.deletedAt !== null)
       throw new ApiError(404, 'GROUP_NOT_FOUND', 'That join code is invalid.');
     await services.db.groupMember.upsert({

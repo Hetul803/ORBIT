@@ -164,7 +164,7 @@ export default function AgentOnboarding(): ReactNode {
           interviewComplete
             ? 'The name comes after the substance.'
             : started
-              ? 'Six honest answers create the first bounded working model of you.'
+              ? 'A few honest answers help your agent understand what matters to you.'
               : 'Your agent starts blank. It earns context from your answers and corrections.'
         }
       />
@@ -172,7 +172,7 @@ export default function AgentOnboarding(): ReactNode {
         <Card>
           <OrbitText variant="title">Start with how you work</OrbitText>
           <OrbitText>
-            No sample profile is loaded. Your answers create the first durable facts.
+            Tell it what matters, how you communicate, and where your boundaries are.
           </OrbitText>
           <Button
             label="Start private interview"
@@ -227,7 +227,7 @@ export default function AgentOnboarding(): ReactNode {
             <OrbitText variant="caption">
               {adaptive
                 ? 'This follow-up adapted to your prior answers.'
-                : 'Using the fixed interview sequence. Your answers—not a sample profile—are saved.'}
+                : 'Your answer is saved. Let’s keep getting to know you.'}
             </OrbitText>
           </Card>
           {facts.length === 0 ? null : (
@@ -245,11 +245,6 @@ export default function AgentOnboarding(): ReactNode {
           />
         </>
       )}
-      <Notice
-        title="Cost bounded"
-        detail="Every adaptive follow-up uses the same per-user and global model-call caps as other ORBIT reasoning."
-        tone="blue"
-      />
       {error === null ? null : <ErrorText message={error} />}
       {modelNotice === null ? null : (
         <Notice title="Answer saved" detail={modelNotice} tone="blue" />

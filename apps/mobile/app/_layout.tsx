@@ -26,6 +26,7 @@ import { apiTransport } from '@/transport';
 import { configuredApiUrl } from '@/api';
 import { clearSocialOfflineCache } from '@/offline';
 import { subscribeSafetyUpdates } from '@/safety-updates';
+import { MainNavigation } from '@/navigation';
 
 void SplashScreen.preventAutoHideAsync();
 
@@ -81,6 +82,7 @@ function RootLayout(): ReactNode {
   }, [accessToken]);
 
   const inAuth = segments[0] === '(auth)';
+  const inOnboarding = segments[0] === '(onboarding)';
   const routeAllowed = accessToken === null ? inAuth : !inAuth;
 
   useEffect(() => {
@@ -91,26 +93,34 @@ function RootLayout(): ReactNode {
   if (!fontsLoaded || !hydrated || !routeAllowed) return null;
   return (
     <QueryClientProvider client={queryClient}>
-      <StatusBar style={dark ? 'light' : 'dark'} />
-      {!reachable ? (
-        <View
-          style={[styles.offlineBanner, { backgroundColor: colors.alert, borderColor: colors.ink }]}
-        >
-          <OrbitText variant="label" style={{ color: colors.ink }}>
-            ORBIT is offline. Cached information is shown
-            {queuedWrites > 0
-              ? `; ${String(queuedWrites)} action${queuedWrites === 1 ? '' : 's'} queued.`
-              : '.'}
-          </OrbitText>
+      <View style={styles.flex}>
+        <StatusBar style={dark ? 'light' : 'dark'} />
+        {!reachable ? (
+          <View
+            style={[
+              styles.offlineBanner,
+              { backgroundColor: colors.alert, borderColor: colors.ink },
+            ]}
+          >
+            <OrbitText variant="label" style={{ color: colors.ink }}>
+              ORBIT is offline. Cached information is shown
+              {queuedWrites > 0
+                ? `; ${String(queuedWrites)} action${queuedWrites === 1 ? '' : 's'} queued.`
+                : '.'}
+            </OrbitText>
+          </View>
+        ) : null}
+        <View style={styles.flex}>
+          <Stack
+            screenOptions={{
+              headerShown: false,
+              contentStyle: { backgroundColor: colors.ground },
+              animation: 'slide_from_right',
+            }}
+          />
         </View>
-      ) : null}
-      <Stack
-        screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: colors.ground },
-          animation: 'slide_from_right',
-        }}
-      />
+        {accessToken !== null && !inAuth && !inOnboarding ? <MainNavigation /> : null}
+      </View>
     </QueryClientProvider>
   );
 }
@@ -118,6 +128,7 @@ function RootLayout(): ReactNode {
 export default Sentry.wrap(RootLayout);
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
   offlineBanner: {
     borderBottomWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: 16,

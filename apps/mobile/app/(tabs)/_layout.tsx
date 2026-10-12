@@ -34,6 +34,7 @@ export default function TabLayout(): ReactNode {
   const { colors } = useOrbitTheme();
   return (
     <Tabs
+      tabBar={() => null}
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: colors.ink,

@@ -98,6 +98,42 @@ const fetchBounded = async (
   }
 };
 
+let refreshFlight: { token: string; promise: Promise<void> } | null = null;
+
+const refreshSession = async (baseUrl: string, refreshToken: string): Promise<void> => {
+  if (refreshFlight?.token === refreshToken) return refreshFlight.promise;
+  const promise = (async (): Promise<void> => {
+    const refreshed = await fetchBounded(`${baseUrl}/v1/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken }),
+    });
+    // Never sign out because of an outage, and never overwrite a different account/session.
+    if (useAuthStore.getState().refreshToken !== refreshToken) return;
+    if (refreshed.status === 401) {
+      await useAuthStore.getState().signOut();
+      return;
+    }
+    if (!refreshed.ok)
+      throw new ApiRequestError(
+        'Your session could not reconnect yet. Please try again.',
+        refreshed.status,
+        'SESSION_REFRESH_UNAVAILABLE',
+      );
+    const tokens = await decode<{ accessToken: string; refreshToken: string }>(refreshed);
+    if (useAuthStore.getState().refreshToken === refreshToken) {
+      await useAuthStore.getState().setTokens(tokens.accessToken, tokens.refreshToken);
+    }
+  })();
+  const flight = { token: refreshToken, promise };
+  refreshFlight = flight;
+  try {
+    await promise;
+  } finally {
+    if (refreshFlight === flight) refreshFlight = null;
+  }
+};
+
 const fetchWithAuth = async (path: string, init: RequestInit): Promise<Response> => {
   const state = useAuthStore.getState();
   const headers = new Headers(init.headers);
@@ -111,18 +147,17 @@ const fetchWithAuth = async (path: string, init: RequestInit): Promise<Response>
   const timeoutMs = path === '/v1/connections/gmail/sync' ? 20 * 60_000 : 30_000;
   let response = await fetchBounded(`${baseUrl}${path}`, { ...init, headers }, timeoutMs);
   if (response.status !== 401 || state.refreshToken === null) return response;
-  const refreshed = await fetchBounded(`${baseUrl}/v1/auth/refresh`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ refreshToken: state.refreshToken }),
-  });
-  if (!refreshed.ok) {
-    await state.signOut();
-    return response;
+  const current = useAuthStore.getState();
+  if (offlineScope(current.accessToken) !== offlineScope(state.accessToken)) {
+    throw new ApiRequestError('Your session changed. Please try again.', 401, 'SESSION_CHANGED');
   }
-  const tokens = await decode<{ accessToken: string; refreshToken: string }>(refreshed);
-  await state.setTokens(tokens.accessToken, tokens.refreshToken);
-  headers.set('Authorization', `Bearer ${tokens.accessToken}`);
+  if (current.accessToken === state.accessToken) await refreshSession(baseUrl, state.refreshToken);
+  const next = useAuthStore.getState();
+  if (next.accessToken === null) return response;
+  if (offlineScope(next.accessToken) !== offlineScope(state.accessToken)) {
+    throw new ApiRequestError('Your session changed. Please try again.', 401, 'SESSION_CHANGED');
+  }
+  headers.set('Authorization', `Bearer ${next.accessToken}`);
   response = await fetchBounded(`${baseUrl}${path}`, { ...init, headers }, timeoutMs);
   return response;
 };

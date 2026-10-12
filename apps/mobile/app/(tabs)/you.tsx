@@ -45,6 +45,17 @@ export default function You(): ReactNode {
       )}
       <Card>
         <RowLink
+          title="Connected accounts"
+          detail="Gmail, Calendar, and connection status"
+          onPress={() => router.push('/connections')}
+          icon="mail"
+        />
+        <RowLink
+          title="Teach your agent"
+          detail="Your voice, preferences, and boundaries"
+          onPress={() => router.push('/voice')}
+        />
+        <RowLink
           title="Memory"
           detail="See, correct, or remove what your agent knows"
           onPress={() => router.push('/memory')}

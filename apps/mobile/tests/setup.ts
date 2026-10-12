@@ -3,7 +3,13 @@ import '@testing-library/jest-dom/vitest';
 import { vi } from 'vitest';
 
 vi.mock('expo-router', () => ({
-  router: { push: vi.fn(), replace: vi.fn(), back: vi.fn() },
+  router: {
+    push: vi.fn(),
+    replace: vi.fn(),
+    back: vi.fn(),
+    navigate: vi.fn(),
+    canGoBack: vi.fn(() => true),
+  },
   useLocalSearchParams: () => ({ id: 'record-12345678' }),
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
   useSegments: () => [],

@@ -20,7 +20,7 @@ import {
 
 import { api } from '@/api';
 import { AppHeader, EmptyState, Metric, QueryError } from '@/components';
-import type { BriefItem, DailyBrief } from '@/types';
+import type { BriefItem, CurrentUser, DailyBrief } from '@/types';
 import type { LifeItem } from '@/types';
 
 const BriefCard = ({ item }: { item: BriefItem }): ReactNode => (
@@ -68,6 +68,17 @@ export default function Today(): ReactNode {
     queryFn: () => api<LifeItem[]>('/v1/life/catch'),
   });
   const brief = query.data;
+  const me = useQuery({ queryKey: ['me'], queryFn: () => api<CurrentUser>('/v1/me') });
+  const agent = useQuery({
+    queryKey: ['agent'],
+    queryFn: () => api<{ name: string; identitySeed: string }>('/v1/agent'),
+  });
+  const google = useQuery({
+    queryKey: ['gmail-status'],
+    queryFn: () => api<{ available: boolean; connected: boolean }>('/v1/connections/gmail/status'),
+  });
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
   return (
     <Screen scroll={false} contentStyle={styles.screen}>
       <FlashList
@@ -80,8 +91,8 @@ export default function Today(): ReactNode {
         ListHeaderComponent={
           <View style={styles.headerContent}>
             <AppHeader
-              title="Good morning."
-              subtitle="Your private briefing—not a feed designed to keep you scrolling."
+              title={`${greeting}${me.data?.displayName ? `, ${me.data.displayName.split(' ')[0] ?? ''}` : ''}.`}
+              subtitle="A little more like you. A little more useful every day."
               action={
                 <Pressable
                   accessibilityRole="button"
@@ -93,6 +104,51 @@ export default function Today(): ReactNode {
                 </Pressable>
               }
             />
+            <Card tone="yours" style={styles.agentHero}>
+              <View style={styles.cardTop}>
+                <View style={styles.heroText}>
+                  <OrbitText variant="mono">YOUR PERSONAL AGENT</OrbitText>
+                  <OrbitText variant="display">{agent.data?.name ?? 'Your orbit'}</OrbitText>
+                </View>
+                <Icon name="person" size={52} color={colors.yours} />
+              </View>
+              <OrbitText>
+                A space to think clearly, remember what matters, and move things forward in your own
+                voice.
+              </OrbitText>
+              <Button label="Talk to your agent" onPress={() => router.push('/ask')} />
+              <View style={styles.quickActions}>
+                <Button
+                  label="Teach my voice"
+                  kind="secondary"
+                  onPress={() => router.push('/voice')}
+                />
+                <Button
+                  label="Find my people"
+                  kind="secondary"
+                  onPress={() => router.push('/intents')}
+                />
+              </View>
+            </Card>
+            <Card tone={google.data?.connected ? 'moss' : 'blue'}>
+              <OrbitText variant="title">
+                {google.data?.connected
+                  ? 'Your accounts are connected'
+                  : 'Bring your day into focus'}
+              </OrbitText>
+              <OrbitText>
+                {google.data?.connected
+                  ? 'Open your email and calendar connection to check sync status.'
+                  : google.data?.available
+                    ? 'Connect Gmail and Calendar to surface real follow-ups and conflicts.'
+                    : 'Gmail and Calendar are coming after Google verification. Your agent can still work with the context you teach it.'}
+              </OrbitText>
+              <Button
+                label="Gmail & Calendar"
+                kind="secondary"
+                onPress={() => router.push('/connections')}
+              />
+            </Card>
             {brief === undefined || query.isError ? null : (
               <Card tone="yours" style={styles.summary}>
                 <OrbitText variant="mono">WHILE YOU WERE AWAY</OrbitText>
@@ -127,12 +183,14 @@ export default function Today(): ReactNode {
                   <OrbitText variant="title">
                     {catchQuery.data.length > 0
                       ? (catchQuery.data[0]?.title ?? 'Review your Catch')
-                      : 'Nothing needs a follow-up'}
+                      : 'Your follow-ups, in one place'}
                   </OrbitText>
                   <OrbitText>
                     {catchQuery.data.length > 0
                       ? 'Open source-backed emails, commitments, calendar conflicts, and drafts.'
-                      : 'Connect Gmail and Calendar when you are ready.'}
+                      : google.data?.connected
+                        ? 'No source-backed follow-ups were found in the last sync.'
+                        : 'Connect your accounts when available to get started.'}
                   </OrbitText>
                 </Card>
               </Pressable>
@@ -160,8 +218,8 @@ export default function Today(): ReactNode {
             <QueryError message={query.error.message} onRetry={() => void query.refetch()} />
           ) : (
             <EmptyState
-              title="Nothing needs you."
-              detail="Your agent will place completed work, matches, and decisions here."
+              title="Make your first move."
+              detail="Teach a preference, talk through a decision, or watch something that matters to you. Completed work will appear here."
               action={
                 <Button
                   label="Create a watcher"
@@ -185,6 +243,9 @@ const styles = StyleSheet.create({
   separator: { height: spacing.md },
   loading: { gap: spacing.md },
   summary: { paddingVertical: spacing.xl },
+  agentHero: { paddingVertical: spacing.xl, gap: spacing.lg },
+  heroText: { flex: 1, gap: spacing.sm },
+  quickActions: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   catchCard: { gap: spacing.sm },
   metrics: { flexDirection: 'row', gap: spacing.lg, marginTop: spacing.sm },
   cardTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },

@@ -8,7 +8,7 @@ import {
 import { configFromEnvironment, CostCapError, ModelRouter, StubProvider } from '@orbit/llm';
 import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { buildApp } from '../../src/app.js';
 import { loadConfig } from '../../src/config.js';
@@ -100,6 +100,253 @@ describe.runIf(enabled)('ORBIT API integration', () => {
       expect(response.headers['content-type']).toContain('text/html');
       expect(response.body).toContain('ORBIT');
     }
+  });
+
+  it('rejects an unapproved browser origin as a controlled 403, never a server 500', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/ready',
+      headers: { origin: 'https://unapproved.example' },
+    });
+    expect(response.statusCode).toBe(403);
+    expect(response.json().error.code).toBe('ORIGIN_NOT_ALLOWED');
+    expect(response.headers['access-control-allow-origin']).toBeUndefined();
+    expect((await app.inject({ method: 'GET', url: '/ready' })).statusCode).toBe(200);
+  });
+
+  it('does not create an account from sign-in mode and lets a proven mailbox finish explicit signup', async () => {
+    const email = `separate-entry-${testRunId}@orbit.local`;
+    const requested = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/otp/request',
+      remoteAddress: '127.7.0.1',
+      payload: { email },
+    });
+    const code = requested.json().developmentCode as string;
+    const wrong = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/otp/verify',
+      remoteAddress: '127.7.0.1',
+      payload: { email, code: code === '111111' ? '222222' : '111111', mode: 'sign_in' },
+    });
+    expect(wrong.json().error.code).toBe('OTP_INCORRECT');
+    const signin = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/otp/verify',
+      remoteAddress: '127.7.0.1',
+      payload: { email, code, mode: 'sign_in' },
+    });
+    expect(signin.statusCode).toBe(404);
+    expect(await db.user.findUnique({ where: { email } })).toBeNull();
+    const missingAge = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/otp/verify',
+      remoteAddress: '127.7.0.1',
+      payload: { email, code, mode: 'sign_up', displayName: 'Fixture person' },
+    });
+    expect(missingAge.json().error.code).toBe('SIGNUP_DETAILS_REQUIRED');
+    const signup = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/otp/verify',
+      remoteAddress: '127.7.0.1',
+      payload: {
+        email,
+        code,
+        mode: 'sign_up',
+        dateOfBirth: '1990-01-01',
+        displayName: 'Fixture person',
+      },
+    });
+    expect(signup.statusCode).toBe(200);
+    await db.otpChallenge.updateMany({
+      where: { email },
+      data: { createdAt: new Date(Date.now() - 31_000) },
+    });
+    const again = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/otp/request',
+      remoteAddress: '127.7.0.2',
+      payload: { email },
+    });
+    const returning = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/otp/verify',
+      remoteAddress: '127.7.0.2',
+      payload: { email, code: again.json().developmentCode, mode: 'sign_in' },
+    });
+    expect(returning.statusCode).toBe(200);
+    expect(returning.json().user.displayName).toBe('Fixture person');
+  });
+
+  it('creates private groups with owner-only join codes and allows a real member to join', async () => {
+    const owner = await signIn(`group-owner-${testRunId}@orbit.local`, 'Group Owner');
+    const member = await signIn(`group-member-${testRunId}@orbit.local`, 'Group Member');
+    const created = await app.inject({
+      method: 'POST',
+      url: '/v1/groups',
+      headers: { authorization: `Bearer ${owner.accessToken}` },
+      payload: { name: 'Fixture group', kind: 'club', visibility: 'public' },
+      remoteAddress: '127.8.0.1',
+    });
+    expect(created.statusCode).toBe(201);
+    const group = created.json<{
+      id: string;
+      joinCode: string;
+      visibility: string;
+      memberCount: number;
+      role: string;
+    }>();
+    expect(group.visibility).toBe('private');
+    expect(group.memberCount).toBe(1);
+    expect(group.role).toBe('owner');
+    expect(group.joinCode).toMatch(/^[A-F0-9]{20}$/u);
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: `/v1/groups/${group.id}/skills`,
+          headers: { authorization: `Bearer ${member.accessToken}` },
+        })
+      ).statusCode,
+    ).toBe(403);
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/v1/groups/join',
+          headers: { authorization: `Bearer ${member.accessToken}` },
+          payload: { code: group.joinCode.toLowerCase() },
+        })
+      ).statusCode,
+    ).toBe(201);
+    const ownList = (
+      await app.inject({
+        method: 'GET',
+        url: '/v1/groups',
+        headers: { authorization: `Bearer ${owner.accessToken}` },
+      })
+    ).json();
+    const memberList = (
+      await app.inject({
+        method: 'GET',
+        url: '/v1/groups',
+        headers: { authorization: `Bearer ${member.accessToken}` },
+      })
+    ).json();
+    expect(ownList[0].joinCode).toBe(group.joinCode);
+    expect(memberList[0].joinCode).toBeUndefined();
+    expect(memberList[0].memberCount).toBe(2);
+  });
+
+  it('requires voice review and explicit model context consent; uses only the owner’s active memories', async () => {
+    const tokens = await signIn(
+      `personal-agent-${testRunId}@orbit.local`,
+      'Personal Agent Fixture',
+    );
+    const headers = { authorization: `Bearer ${tokens.accessToken}` };
+    await app.inject({
+      method: 'POST',
+      url: '/v1/agent',
+      headers,
+      payload: { name: 'Fixture agent' },
+    });
+    const profile = {
+      tone: ['warm'],
+      sentenceStyle: 'Short and direct',
+      vocabulary: [],
+      avoids: ['No commitments'],
+      examples: ['Coffee Saturday?'],
+    };
+    expect(
+      (
+        await app.inject({
+          method: 'PATCH',
+          url: '/v1/agent',
+          headers,
+          payload: { voiceProfile: profile },
+        })
+      ).statusCode,
+    ).toBe(400);
+    expect(
+      (
+        await app.inject({
+          method: 'PATCH',
+          url: '/v1/agent',
+          headers,
+          payload: { voiceProfile: profile, confirmVoiceProfile: true },
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/v1/agent/chat',
+          headers,
+          payload: { message: 'Help me plan.' },
+        })
+      ).statusCode,
+    ).toBe(400);
+    const user = await db.user.findUniqueOrThrow({
+      where: { email: `personal-agent-${testRunId}@orbit.local` },
+      include: { agent: true },
+    });
+    const agentId = user.agent?.id;
+    if (agentId === undefined) throw new Error('Fixture agent missing');
+    await db.memoryFact.create({
+      data: {
+        agentId,
+        kind: 'PREFERENCE',
+        content: 'Quiet mornings',
+        source: 'CORRECTION',
+        confidence: 1,
+      },
+    });
+    await db.memoryFact.create({
+      data: {
+        agentId,
+        kind: 'PREFERENCE',
+        content: 'Forgotten fact must not be sent',
+        source: 'CORRECTION',
+        confidence: 1,
+        deletedAt: new Date(),
+      },
+    });
+    const completion = vi.spyOn(ModelRouter.prototype, 'complete').mockResolvedValueOnce({
+      text: 'Protect a quiet morning.',
+      provider: 'fixture-model',
+      model: 'fixture',
+      tokensIn: 10,
+      tokensOut: 10,
+      latencyMs: 1,
+      costCents: 0,
+      usedFallback: false,
+    });
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/v1/agent/chat',
+        headers,
+        payload: { message: 'Help me plan.', contextConsent: true },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json().memoryCount).toBe(1);
+      const prompt = JSON.stringify(completion.mock.calls[0]?.[0].messages);
+      expect(prompt).toContain('Quiet mornings');
+      expect(prompt).toContain('Coffee Saturday?');
+      expect(prompt).not.toContain('Forgotten fact');
+      expect(completion.mock.calls[0]?.[0].constraints.maxOutputTokens).toBe(450);
+    } finally {
+      completion.mockRestore();
+    }
+    const unavailable = await app.inject({
+      method: 'POST',
+      url: '/v1/agent/chat',
+      headers,
+      payload: { message: 'Help me plan.', contextConsent: true },
+    });
+    expect(unavailable.statusCode).toBe(503);
+    expect(unavailable.json().error.code).toBe('PERSONAL_AGENT_UNAVAILABLE');
   });
 
   it('allows browser preflights for every mutation method used by the app', async () => {

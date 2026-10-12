@@ -2,7 +2,7 @@ import { FlashList } from '@shopify/flash-list';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
 import { useEffect, useState, type ReactNode } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { Button, Card, OrbitText, Pill, Ring, Screen, spacing } from '@orbit/ui';
 
 import { api } from '@/api';
@@ -43,9 +43,28 @@ interface ActivityPage {
   items: Activity[];
 }
 
-const title = (kind: IntentKind): string => kind.replaceAll('_', ' ');
+const labels: Record<IntentKind, string> = {
+  dating: 'Dating',
+  friendship: 'Friends',
+  roommate: 'Roommates',
+  cofounder: 'Cofounders',
+  study_partner: 'Study partners',
+  gym_partner: 'Gym partners',
+  mentor: 'Mentors',
+  hiring: 'Hiring',
+  exchange: 'Exchange',
+};
+const title = (kind: IntentKind): string => labels[kind];
 
-const IntentEditor = ({ intent }: { intent: Intent }): ReactNode => {
+const IntentEditor = ({
+  intent,
+  expanded,
+  onToggle,
+}: {
+  intent: Intent;
+  expanded: boolean;
+  onToggle: () => void;
+}): ReactNode => {
   const client = useQueryClient();
   const [goal, setGoal] = useState(
     typeof intent.params.goal === 'string' ? intent.params.goal : '',
@@ -54,6 +73,7 @@ const IntentEditor = ({ intent }: { intent: Intent }): ReactNode => {
     typeof intent.params.constraints === 'string' ? intent.params.constraints : '',
   );
   const [pausedUntil, setPausedUntil] = useState(intent.pausedUntil?.slice(0, 10) ?? '');
+  const [formError, setFormError] = useState<string | null>(null);
 
   useEffect(() => {
     setGoal(typeof intent.params.goal === 'string' ? intent.params.goal : '');
@@ -90,6 +110,16 @@ const IntentEditor = ({ intent }: { intent: Intent }): ReactNode => {
 
   const save = (active = intent.active): void => {
     const pause = pausedUntil.trim();
+    setFormError(null);
+    if (
+      pause.length > 0 &&
+      (!/^\d{4}-\d{2}-\d{2}$/u.test(pause) ||
+        !Number.isFinite(Date.parse(`${pause}T23:59:59.000Z`)) ||
+        new Date(`${pause}T23:59:59.000Z`).toISOString().slice(0, 10) !== pause)
+    ) {
+      setFormError('Enter a valid date as YYYY-MM-DD, or leave it empty.');
+      return;
+    }
     mutation.mutate({
       ...intent,
       active,
@@ -101,7 +131,14 @@ const IntentEditor = ({ intent }: { intent: Intent }): ReactNode => {
 
   return (
     <Card tone={intent.active ? 'yours' : 'paper'}>
-      <View style={styles.intentTop}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${title(intent.kind)} preferences`}
+        accessibilityState={{ expanded }}
+        aria-expanded={expanded}
+        onPress={onToggle}
+        style={styles.intentTop}
+      >
         <View style={styles.intentTitle}>
           <Ring value={intent.active ? 1 : 0} tone="yours" size={42} seed={intent.kind} />
           <View>
@@ -109,48 +146,57 @@ const IntentEditor = ({ intent }: { intent: Intent }): ReactNode => {
               {title(intent.kind)}
             </OrbitText>
             <OrbitText variant="caption">
-              Updated {new Date(intent.updatedAt).toLocaleString()}
+              {intent.id.startsWith('new-')
+                ? 'Choose what matters to you'
+                : `Updated ${new Date(intent.updatedAt).toLocaleDateString()}`}{' '}
+              · {expanded ? 'Collapse −' : 'Customize +'}
             </OrbitText>
           </View>
         </View>
         <Pill tone={intent.active ? 'yours' : 'neutral'}>
           {intent.active ? 'ACTIVE' : 'PAUSED'}
         </Pill>
-      </View>
-      <Field
-        label="What should your agent look for?"
-        value={goal}
-        onChangeText={setGoal}
-        multiline
-      />
-      <Field
-        label="Constraints or dealbreakers"
-        value={constraints}
-        onChangeText={setConstraints}
-        multiline
-      />
-      <Field
-        label="Pause until"
-        value={pausedUntil}
-        onChangeText={setPausedUntil}
-        placeholder="YYYY-MM-DD or leave empty"
-        hint="A date pauses matching through the end of that day."
-      />
-      <View style={styles.actions}>
-        <Button label="Save details" onPress={() => save()} loading={mutation.isPending} />
-        <Button
-          label={intent.active ? 'Pause intent' : 'Activate intent'}
-          kind="secondary"
-          onPress={() => save(!intent.active)}
-          loading={mutation.isPending}
-        />
-      </View>
-      {mutation.error === null ? null : <ErrorText message={mutation.error.message} />}
+      </Pressable>
+      {expanded ? (
+        <>
+          <Field
+            label="What should your agent look for?"
+            value={goal}
+            onChangeText={setGoal}
+            multiline
+          />
+          <Field
+            label="Constraints or dealbreakers"
+            value={constraints}
+            onChangeText={setConstraints}
+            multiline
+          />
+          <Field
+            label="Pause until"
+            value={pausedUntil}
+            onChangeText={setPausedUntil}
+            placeholder="YYYY-MM-DD or leave empty"
+            hint="A date pauses matching through the end of that day."
+          />
+          <View style={styles.actions}>
+            <Button label="Save details" onPress={() => save()} loading={mutation.isPending} />
+            <Button
+              label={intent.active ? 'Pause intent' : 'Activate intent'}
+              kind="secondary"
+              onPress={() => save(!intent.active)}
+              loading={mutation.isPending}
+            />
+          </View>
+          {mutation.error === null ? null : <ErrorText message={mutation.error.message} />}
+          {formError === null ? null : <ErrorText message={formError} />}
+        </>
+      ) : null}
     </Card>
   );
 };
 
 export default function Intents(): ReactNode {
+  const [expanded, setExpanded] = useState<IntentKind | null>(null);
   const intents = useQuery({ queryKey: ['intents'], queryFn: () => api<Intent[]>('/v1/intents') });
   const activity = useQuery({
     queryKey: ['activity'],
@@ -183,15 +229,22 @@ export default function Intents(): ReactNode {
         ListHeaderComponent={
           <View style={styles.header}>
             <AppHeader
-              title="Active intents"
-              subtitle="Tell your agent what to look for, set boundaries, and pause matching without deleting context."
+              title="Find your people"
+              subtitle="Choose a category to set your preferences. You decide when your agent starts looking."
             />
             {intents.isError ? (
               <QueryError message={intents.error.message} onRetry={() => void intents.refetch()} />
             ) : null}
           </View>
         }
-        renderItem={({ item }) => <IntentEditor intent={item} />}
+        extraData={expanded}
+        renderItem={({ item }) => (
+          <IntentEditor
+            intent={item}
+            expanded={expanded === item.kind}
+            onToggle={() => setExpanded(expanded === item.kind ? null : item.kind)}
+          />
+        )}
         ListFooterComponent={
           <View style={styles.footer}>
             <OrbitText variant="title">Recent intent activity</OrbitText>

@@ -152,11 +152,11 @@ export default function Connections(): ReactNode {
     <Screen>
       <AppHeader
         title="Connections"
-        subtitle="Explicit, narrow permissions. No social scraping—ever."
+        subtitle="Choose what your agent can read. You can disconnect at any time."
       />
       <Notice
-        title="Read narrowly; delivery stays off"
-        detail="Gmail and Google Calendar are read-only. ORBIT can surface source-backed follow-ups and drafts, but it never sends mail, edits events, or expands scope silently."
+        title="Your accounts, your choice"
+        detail="Google access is read-only: follow-ups and drafts, without sending mail or changing events."
         tone="moss"
       />
       {gmail.isError ? (
@@ -175,11 +175,15 @@ export default function Connections(): ReactNode {
           <OrbitText variant="title">Read-only Gmail + Calendar</OrbitText>
           {gmail.data.available ? (
             <OrbitText>
-              Scopes: gmail.readonly and calendar.readonly. Refresh tokens are encrypted and can be
-              revoked here.
+              Read email and upcoming events to find follow-ups and scheduling conflicts. Disconnect
+              here whenever you want.
             </OrbitText>
           ) : (
-            <OrbitText>{gmail.data.unavailableReason}</OrbitText>
+            <OrbitText>
+              Google connection is not available in this release yet. We’re completing Google’s
+              verification before enabling it. You can still teach your agent and manage your
+              preferences.
+            </OrbitText>
           )}
           {gmail.data.connected ? (
             <>

@@ -244,6 +244,25 @@ export const registerAuthRoutes = (app: FastifyInstance, services: Services): vo
           remainingAttempts: Math.max(0, 6 - updated.attempts),
         });
       }
+      // Account existence is disclosed only after the caller proves mailbox ownership.
+      const existingUser = await services.db.user.findUnique({ where: { email } });
+      if (existingUser === null && body.mode === 'sign_in') {
+        throw new ApiError(
+          404,
+          'ACCOUNT_NOT_FOUND',
+          'No account exists for this verified email. Choose Create account to continue.',
+        );
+      }
+      if (
+        existingUser === null &&
+        (body.displayName === undefined || body.dateOfBirth === undefined)
+      ) {
+        throw new ApiError(
+          400,
+          'SIGNUP_DETAILS_REQUIRED',
+          'Enter your name and date of birth to create an account.',
+        );
+      }
       const claimed = await services.db.otpChallenge.updateMany({
         where: {
           id: challenge.id,
@@ -256,7 +275,6 @@ export const registerAuthRoutes = (app: FastifyInstance, services: Services): vo
       if (claimed.count !== 1) {
         throw new ApiError(401, 'OTP_INVALID', 'This code was already used. Request a new one.');
       }
-      const existingUser = await services.db.user.findUnique({ where: { email } });
       const emailHash = sha256(email);
       if (existingUser === null) {
         const priorRejection = await services.db.ageGateAttempt.findFirst({
@@ -275,7 +293,7 @@ export const registerAuthRoutes = (app: FastifyInstance, services: Services): vo
           );
         }
       }
-      const birthDate = existingUser?.dateOfBirth ?? new Date(`${body.dateOfBirth}T00:00:00.000Z`);
+      const birthDate = existingUser?.dateOfBirth ?? new Date(body.dateOfBirth ?? Number.NaN);
       const allowed = isAdult(birthDate);
       if (existingUser === null) {
         await services.db.ageGateAttempt.create({
@@ -309,6 +327,8 @@ export const registerAuthRoutes = (app: FastifyInstance, services: Services): vo
         await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(805001)`;
         const current = await tx.user.findUnique({ where: { email } });
         if (current === null) {
+          if (body.mode === 'sign_in')
+            throw new ApiError(404, 'ACCOUNT_NOT_FOUND', 'Create an account before signing in.');
           const startOfDay = new Date();
           startOfDay.setUTCHours(0, 0, 0, 0);
           const [accountCount, accountsFromIp] = await Promise.all([
@@ -359,7 +379,7 @@ export const registerAuthRoutes = (app: FastifyInstance, services: Services): vo
             emailVerifiedAt: new Date(),
             dateOfBirth: birthDate,
             ageVerifiedAt: new Date(),
-            displayName: body.displayName,
+            displayName: body.displayName ?? existingUser?.displayName ?? '',
             role: adminEmails.has(email) ? 'ADMIN' : 'USER',
             signupIpHash: ipHash,
           },

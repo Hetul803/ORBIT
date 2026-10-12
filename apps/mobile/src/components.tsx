@@ -1,10 +1,11 @@
 import type { ReactNode } from 'react';
 import { Pressable, StyleSheet, TextInput, type TextInputProps, View } from 'react-native';
-import { Card, Icon, OrbitText, radii, Ring, spacing, useOrbitTheme } from '@orbit/ui';
+import { Card, Icon, OrbitText, radii, spacing, useOrbitTheme } from '@orbit/ui';
+import { AppBack } from './navigation';
 
 export const Wordmark = (): ReactNode => (
   <View style={styles.wordmark}>
-    <Ring value={0.72} tone="yours" size={30} seed="orbit-wordmark" />
+    <Icon name="circle" size={30} />
     <OrbitText variant="mono" style={styles.wordmarkText}>
       ORBIT
     </OrbitText>
@@ -20,15 +21,18 @@ export const AppHeader = ({
   subtitle?: string;
   action?: ReactNode;
 }): ReactNode => (
-  <View style={styles.header}>
-    <View style={styles.flex}>
-      <OrbitText variant="mono" style={styles.eyebrow}>
-        ORBIT / PRIVATE AGENT
-      </OrbitText>
-      <OrbitText variant="display">{title}</OrbitText>
-      {subtitle === undefined ? null : <OrbitText style={styles.subtitle}>{subtitle}</OrbitText>}
+  <View>
+    <AppBack />
+    <View style={styles.header}>
+      <View style={styles.flex}>
+        <OrbitText variant="mono" style={styles.eyebrow}>
+          ORBIT
+        </OrbitText>
+        <OrbitText variant="display">{title}</OrbitText>
+        {subtitle === undefined ? null : <OrbitText style={styles.subtitle}>{subtitle}</OrbitText>}
+      </View>
+      {action}
     </View>
-    {action}
   </View>
 );
 
@@ -136,9 +140,7 @@ export const QueryError = ({
 }): ReactNode => (
   <Card tone="alert">
     <OrbitText variant="title">Couldn’t load this yet.</OrbitText>
-    <OrbitText>
-      {message ?? 'Check your connection, then try again. No placeholder records are being shown.'}
-    </OrbitText>
+    <OrbitText>{message ?? 'Check your connection, then try again.'}</OrbitText>
     <Pressable accessibilityRole="button" accessibilityLabel="Try again" onPress={onRetry}>
       <OrbitText variant="label">Try again →</OrbitText>
     </Pressable>

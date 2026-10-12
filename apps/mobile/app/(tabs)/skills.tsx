@@ -37,8 +37,8 @@ export default function Skills(): ReactNode {
               subtitle="Every correction can become a versioned, testable capability—not another forgotten chat."
             />
             <Notice
-              title="The ORVIN backbone"
-              detail="ORBIT reuses validated steps, rents frontier reasoning only for unfamiliar branches, and shows the efficiency gain."
+              title="Teach it once. Make it yours."
+              detail="Save a useful process, try it, and correct it. Your agent remembers what works for you."
               tone="moss"
             />
           </View>

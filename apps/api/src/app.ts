@@ -134,7 +134,12 @@ export const buildApp = async (db: PrismaClient, config: ApiConfig): Promise<Fas
   await app.register(cors, {
     origin: (origin, callback) => {
       const allowed = origin === undefined || allowedOrigins.has(origin);
-      callback(allowed ? null : new Error('Origin is not allowed'), allowed);
+      callback(
+        allowed
+          ? null
+          : new ApiError(403, 'ORIGIN_NOT_ALLOWED', 'This browser origin is not allowed.'),
+        allowed,
+      );
     },
     credentials: false,
     methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],

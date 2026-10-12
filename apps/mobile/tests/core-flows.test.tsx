@@ -88,13 +88,42 @@ describe('mobile core interactions', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send six-digit code' }));
     expect(await screen.findByText('Verify it’s you')).toBeInTheDocument();
     expect(screen.getByLabelText('Code')).toHaveValue('');
-    expect(screen.getByText(/never displays sign-in codes inside the app/iu)).toBeInTheDocument();
+    expect(screen.getByText(/Use the most recent email/iu)).toBeInTheDocument();
     change('Code', '321654');
     change('What should we call you?', 'Avery');
     change('Date of birth', '1996-02-03');
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
     await waitFor(() => expect(setTokensMock).toHaveBeenCalledWith('access-real', 'refresh-real'));
     expect(router.replace).toHaveBeenCalledWith('/agent');
+  });
+
+  it('signs returning users in without asking for name or birth date again', async () => {
+    apiMock
+      .mockResolvedValueOnce({ ok: true, expiresIn: 600, resendAfterSeconds: 30 })
+      .mockResolvedValueOnce({
+        accessToken: 'returning-access',
+        refreshToken: 'returning-refresh',
+        hasAgent: true,
+      });
+    render(<SignIn />);
+    fireEvent.click(screen.getByRole('button', { name: /^Sign in$/u }));
+    change('Email', 'returning@example.com');
+    fireEvent.click(screen.getByRole('button', { name: 'Send six-digit code' }));
+    await screen.findByLabelText('Code');
+    expect(screen.queryByLabelText('Date of birth')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('What should we call you?')).not.toBeInTheDocument();
+    change('Code', '123456');
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    await waitFor(() =>
+      expect(setTokensMock).toHaveBeenCalledWith('returning-access', 'returning-refresh'),
+    );
+    expect(apiMock).toHaveBeenLastCalledWith(
+      '/v1/auth/otp/verify',
+      expect.objectContaining({
+        body: JSON.stringify({ email: 'returning@example.com', code: '123456', mode: 'sign_in' }),
+      }),
+    );
+    expect(router.replace).toHaveBeenCalledWith('/today');
   });
 
   it('keeps the agent unnamed until the bounded interview completes', async () => {
