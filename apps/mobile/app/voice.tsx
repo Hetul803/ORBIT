@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import * as DocumentPicker from 'expo-document-picker';
 import { File, Paths } from 'expo-file-system';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Platform } from 'react-native';
 import { Button, Card, OrbitText, Screen } from '@orbit/ui';
 import { api, patchBody } from '@/api';
 import { AppHeader, ErrorText, Field, Notice, QueryError } from '@/components';
@@ -52,18 +53,28 @@ export default function TeachVoice(): ReactNode {
       });
       if (result.canceled || result.assets[0] === undefined) return;
       const asset = result.assets[0];
-      const file = new File(asset.uri);
       let parsed: WritingMessage[];
-      try {
+      const validate = (): void => {
         if (!asset.name.toLowerCase().endsWith('.txt') || (asset.size ?? 0) > 100_000)
           throw new Error(
             'Choose a .txt file smaller than 100 KB. Unzip a WhatsApp export in Files first.',
           );
-        if (file.size > 100_000) throw new Error('Choose a text export smaller than 100 KB.');
-        parsed = parseWhatsAppText(await file.text());
-      } finally {
-        // Erase only the picker’s temporary copy, never the original selected file.
-        if (file.exists && file.uri.startsWith(Paths.cache.uri)) file.delete();
+      };
+      if (Platform.OS === 'web') {
+        validate();
+        if (asset.file === undefined || asset.file.size > 100_000)
+          throw new Error('Choose a readable text export smaller than 100 KB.');
+        parsed = parseWhatsAppText(await asset.file.text());
+      } else {
+        const file = new File(asset.uri);
+        try {
+          validate();
+          if (file.size > 100_000) throw new Error('Choose a text export smaller than 100 KB.');
+          parsed = parseWhatsAppText(await file.text());
+        } finally {
+          // Erase only the picker’s temporary copy, never the original selected file.
+          if (file.exists && file.uri.startsWith(Paths.cache.uri)) file.delete();
+        }
       }
       if (parsed.length === 0)
         throw new Error(

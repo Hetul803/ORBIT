@@ -4,6 +4,8 @@ The API listens on port 4100 by default. Authenticated routes require `Authoriza
 
 ## Public-alpha safety and admission (October 11)
 
+See also the [October 12 founder-feedback API changes](FOUNDER_FEEDBACK_20261012.md#5-api-changes-in-this-repair): signup/signin mode handling, owner-only group codes, new private group creation, required voice-profile review and new consented personal-agent chat. The chat route uses current owner memories/voice and existing model caps, has no tools/external actions, and has not passed its live-model smoke (local key expired). Server refresh rotation is unchanged; the client now deduplicates concurrent refresh and preserves sessions during temporary failures. Google phone credentials are founder-only Testing, not public verification.
+
 | Endpoint                                      | Authorization / behavior                                                                                                                                                                                                                    |
 | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `GET /v1/alpha/status`                        | Public capacity, full/admission status and honest pause reason; no private account roster.                                                                                                                                                  |

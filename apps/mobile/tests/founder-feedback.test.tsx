@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactElement, ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 const apiMock = vi.hoisted(() => vi.fn());
+const documentPickerMock = vi.hoisted(() => vi.fn());
 vi.mock('@/api', () => ({
   api: apiMock,
   jsonBody: (value: unknown) => ({ method: 'POST', body: JSON.stringify(value) }),
@@ -10,9 +11,16 @@ vi.mock('@/api', () => ({
 }));
 vi.mock('expo-clipboard', () => ({ setStringAsync: vi.fn(async () => undefined) }));
 vi.mock('expo-document-picker', () => ({
-  getDocumentAsync: vi.fn(async () => ({ canceled: true })),
+  getDocumentAsync: documentPickerMock,
 }));
-vi.mock('expo-file-system', () => ({ File: class {} }));
+vi.mock('expo-file-system', () => ({
+  File: class {
+    constructor() {
+      throw new Error('Native filesystem must never be used for a browser file');
+    }
+  },
+  Paths: { cache: { uri: 'file:///fixture-cache/' } },
+}));
 vi.mock('@shopify/flash-list', () => ({
   FlashList: ({
     data,
@@ -49,6 +57,8 @@ const renderQuery = (element: ReactElement): void => {
 describe('founder feedback journeys', () => {
   beforeEach(() => {
     apiMock.mockReset();
+    documentPickerMock.mockReset();
+    documentPickerMock.mockResolvedValue({ canceled: true });
   });
   it('collapses categories and opens only the selected finder preferences', async () => {
     apiMock.mockImplementation(async (path: string) =>
@@ -161,5 +171,53 @@ describe('founder feedback journeys', () => {
         }),
       }),
     );
+  });
+  it('reads a browser-selected file locally and keeps only the owner’s reviewed messages', async () => {
+    const text =
+      '[10/12/26, 10:30:00 AM] QA Owner: Coffee Saturday?\n[10/12/26, 10:31:00 AM] Someone Else: Not an owner example.\n[10/12/26, 10:32:00 AM] QA Owner: Reach me at fixture@example.com.';
+    documentPickerMock.mockResolvedValue({
+      canceled: false,
+      assets: [
+        {
+          name: 'synthetic.txt',
+          size: text.length,
+          uri: 'blob:fixture',
+          file: { size: text.length, text: () => Promise.resolve(text) },
+        },
+      ],
+    });
+    apiMock.mockResolvedValue({
+      voiceProfile: {
+        tone: ['warm'],
+        sentenceStyle: 'Short and natural',
+        vocabulary: [],
+        avoids: [],
+        examples: [],
+      },
+    });
+    renderQuery(<Voice />);
+    await waitFor(() =>
+      expect(screen.getByLabelText('How should your agent sound?')).toHaveValue(
+        'Short and natural',
+      ),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Choose WhatsApp text export' }));
+    await screen.findByRole('button', { name: 'Use only QA Owner’s messages' });
+    expect(apiMock.mock.calls.filter(([, init]) => init?.method === 'PATCH')).toHaveLength(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Use only QA Owner’s messages' }));
+    expect(screen.getByLabelText('Messages you wrote')).toHaveValue(
+      'Coffee Saturday?\n\nReach me at [email].',
+    );
+    expect(screen.getByRole('button', { name: 'Save my voice' })).toBeDisabled();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'I reviewed these examples and they are mine' }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Save my voice' }));
+    await screen.findByText('Your voice is saved');
+    const write = apiMock.mock.calls.find(([, init]) => init?.method === 'PATCH');
+    expect(JSON.parse(write?.[1].body ?? '{}').voiceProfile.examples).toEqual([
+      'Coffee Saturday?',
+      'Reach me at [email].',
+    ]);
   });
 });
