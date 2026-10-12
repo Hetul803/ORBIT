@@ -1,5 +1,11 @@
 # ORBIT Pass 5 verification and handoff
 
+## October 12, 04:05 Chicago delivery checkpoint
+
+Signed IPA and APK builds exist and passed the documented signature/identity/targeted bundle inspections. Apple agreements and dedicated **ORBIT: Private Companion / 6821827369** record are complete. Both unavailable Developer upload keys **F7R2Q93648 and WBHMN47C36 are permanently revoked**, each separately approved; no third key or EAS import. Founder installed/signed into Transporter, but automated file selection did not load a package and manual IPA addition is a founder handoff. No verified delivery, TestFlight install, native push/crash or phone feature sweep. [Exact current evidence and fallback](STORE_RELEASE_AND_AGENT_READINESS.md).
+
+This follow-up passes **22 root configuration tests**, zero failures/skips; the last full isolated application/root-suite run remains **150 passed**, not a new full rerun. Local /agent and production /ready return HTTP 200, database ready. Public admission remains false with capacity 100 / safety_coverage, and production Google stays disabled. The October 11 table and October 9 transcripts below are historical checkpoints; no missing physical test is converted to passed by a binary build or a configuration test. Public stores still wait for actual Google verification and all release gates.
+
 ## October 11 deployment addendum — current state
 
 The remainder of this document preserves the **October 9 historical pass**, including its transcripts, cause breakdown and then-unavailable providers. Its old statements that no API/email/EAS setup exists are superseded by [current product report](PUBLIC_ALPHA_VERIFICATION.md) and [provider verification](PROVIDER_SETUP_VERIFICATION.md).
