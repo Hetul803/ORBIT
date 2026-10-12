@@ -2,6 +2,8 @@
 
 Prepared October 9, 2026; contact/owned-domain status updated October 11. This packet is for later submission; neither store has been submitted.
 
+October 12: iOS signing is configured and its first IPA built successfully; signature, identity/profile and targeted bundle checks pass. Apple rejected the exact store display name ORBIT as already in use; a founder-approved alternative is pending, so the record is not created. Personal Play registration is complete, but identity/device/phone checks still block app creation. Public submission waits for verified Google access and all remaining release checks. See [current evidence](STORE_RELEASE_AND_AGENT_READINESS.md); older packet values below are proposed metadata, not provider completion receipts.
+
 ## Product identity
 
 | Field                                    | Value                                                                                                         |
@@ -99,7 +101,7 @@ Choose **Yes, we collect data**. “Linked to the user” below means the record
 | Usage Data → Product Interaction       | Yes                                            | Yes          | No       | Catch actions, reveals, approvals, settings, sync receipts, runs, and activity audit                                                   |
 | Usage Data → Other Usage Data          | Yes                                            | Yes          | No       | Model task/provider/token/cost status and rate/cost-limit enforcement                                                                  |
 | Diagnostics → Crash Data               | Yes when Sentry is configured                  | No by design | No       | Crash diagnosis; do not attach account email or prompt/body data to events                                                             |
-| Diagnostics → Performance Data         | Yes when Sentry is configured                  | No by design | No       | Trace/performance diagnosis at a 0.1 sample rate                                                                                       |
+| Diagnostics → Performance Data         | Not currently collected                        | —            | No       | Current API, worker and mobile configuration uses tracesSampleRate 0; re-evaluate disclosures before enabling performance collection   |
 | Other Data → Other Data Types          | Yes                                            | Yes          | No       | Date of birth/18+ result, consent records, one-way IP hashes, safety/block/moderation records                                          |
 
 Answer **No** for purchases, financial information, precise or coarse location, health and fitness, address book contacts, photos/videos, audio, gameplay, advertising data, browser history, and search history. If a future SDK or feature begins collecting one of them, update the form before shipping it.
