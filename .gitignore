@@ -11,4 +11,5 @@ apps/mobile/ios/
 apps/mobile/android/
 packages/db/src/generated/
 tmp/
+artifacts/
 .DS_Store

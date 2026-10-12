@@ -2,6 +2,8 @@
 
 Updated October 11, 2026: the founder expanded this cohort to include strangers, with a hard ceiling of 100 accounts. The historical dates below were missed; they are not evidence of distribution. Apply the [public-alpha verification](PUBLIC_ALPHA_VERIFICATION.md), [moderation runbook](MODERATION_RUNBOOK.md) and [orbitapp.world DNS handoff](DOMAIN_SETUP.md) before opening admission. The own-domain landing and legal/support pages are live over HTTPS; no TestFlight/APK links exist yet.
 
+Latest decision: public App Store/Google Play release is requested **after verified Google access**, not as an unverified 100-user workaround. Android keystore/build is approved; APK completed and signature/package/config inspected, with no physical-install proof yet. Apple agreement cleared; iOS signing approval/Play account setup remain pending. See [current gates, APK evidence and onboarding-fidelity findings](STORE_RELEASE_AND_AGENT_READINESS.md). Do not call an APK or passing automated suite a public store launch.
+
 Prepared Friday, October 9, 2026. Target: founder on iPhone by Saturday, October 10; about 25 invited people by Monday, October 12. This is TestFlight/APK distribution, not public store release.
 
 > **Current blockers:** signed phone builds/installation, separate production Google setup, real deployed/device verification and staffed safety response. Resend sending domain/key are now verified and installed; local founder OTP arrived and onboarding was confirmed. Deployed non-founder OTP and actual report email/native push still need proof. Public signups remain closed. No code is shown on screen.

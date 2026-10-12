@@ -2,6 +2,8 @@
 
 Evidence date: October 11, 2026. Founder ceiling: **everything for the app under $100/month**. Figures are allocations, not an observed invoice or a promise of unrestricted use for 100 people.
 
+Latest signing follow-up: Android keystore/test build approved within Free quota; no EAS upgrade bought. Apple agreement cleared personally. New Google Play registration, if needed, is a separate $25 one-time charge plus identity/type prerequisites, not already purchased. Founder elected to wait for actual Google verification before public store release; assessment/legal/staffing costs remain unapproved and unbudgeted. [Current release and agent-readiness gates](STORE_RELEASE_AND_AGENT_READINESS.md).
+
 ## Actual running state
 
 - [Local ORBIT](http://localhost:8081/agent) and the local API are running. Real Resend OTP reached the founder, who entered the code and confirmed onboarding. Primary database: 44 accounts, previous 43 preserved; sixteen migrations. It was not wiped or reseeded.

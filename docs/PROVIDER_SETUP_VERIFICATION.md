@@ -2,6 +2,8 @@
 
 Evidence date: October 11, 2026. This updates provider/deployment evidence, not a claim that the entire requested phone launch is complete. Product screens, buttons and APIs are inventoried in [PUBLIC_ALPHA_VERIFICATION.md](PUBLIC_ALPHA_VERIFICATION.md); the remaining feature backlog is retained there.
 
+October 12 update: [store/agent-readiness report](STORE_RELEASE_AND_AGENT_READINESS.md) records the founder's decision to wait for Google verification before public store release, cleared Apple agreement, completed Android APK/signature/config inspection, mobile archive/hook/Metro repairs and latest **150-test** full isolated run. Initial no-signing/no-build statements below describe the earlier provider checkpoint, not the latest build stage. No phone installation is claimed.
+
 ## Decision and usable URLs
 
 - [Local UI](http://localhost:8081/agent): running, founder's existing browser account preserved.

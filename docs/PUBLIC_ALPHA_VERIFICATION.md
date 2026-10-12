@@ -2,6 +2,8 @@
 
 Evidence date: October 11, 2026. This is the current addendum to the original 31-feature build and Passes 2–5, including the founder's public-alpha requirements. Older reports preserve historical evidence; they do not override this report's launch limits.
 
+October 12 update: the founder now requests public App Store/Google Play release, **after verified Google access**. Android signing is approved; the EAS APK build from 8971c2d succeeded. Its signature/package/configuration are inspected and the binary retained locally, but physical installation/feature testing are unverified. Latest isolated suite is **150 passing, zero skipped** after two build-configuration tests were added. Apple agreement cleared personally by founder; Play registration and iOS signing authority remain prerequisites. Crucially, six-answer onboarding is a starter profile, not proven faithful representation: [current store/agent-readiness assessment, APK hashes and checks](STORE_RELEASE_AND_AGENT_READINESS.md), [onboarding gap #36](https://github.com/Hetul803/ORBIT/issues/36). Earlier 148-test/provider checkpoints below remain historical evidence for their stages.
+
 ## 1. The decision
 
 **The app runs locally and the new safety/admission behavior is implemented and tested. ORBIT is not yet delivered as a deployed, signed, publicly installable phone alpha. Do not invite strangers yet.**
