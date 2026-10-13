@@ -1,5 +1,7 @@
 # ORBIT: founder phone feedback, deployed repairs and launch handoff
 
+Released follow-on sprint, October 12, 13:25 Chicago: approved **74cea03** is live on API/worker; additive migration 17 applied. Matching iOS-only conversation/inbox update **9b4778f6** is published, manifest/served artifact hash verified. Latest suite: 194 passed, zero failures/skips. Native new-screen acceptance and real bounded Gmail completion remain pending; public signup/staffing remain closed and Google stays Testing. [Detailed current sprint/release report](GMAIL_SYNC_CHAT_20261012.md) supersedes the earlier local-only, expired-key and pending-consent checkpoints below.
+
 Superseding checkpoint, October 12, 13:05 Chicago: founder confirmed Google consent and partial Gmail import, then successful native My agent replies after scoped key replacement. The old form UI is still installed. New conversation UI, categorized inbox and durable resumable Google sync pass a **194-test** isolated suite and root lint/typecheck, but are not yet deployed/published. Migration 17 is local only; safety/signup gates remain closed and Google stays Testing. [Detailed follow-on sprint report](GMAIL_SYNC_CHAT_20261012.md) supersedes the expired-key/pending-consent statements below while preserving the earlier repair's evidence.
 
 Evidence checkpoint: October 12, 2026, 11:45 Chicago. This report supersedes older statements that the founder has not installed ORBIT or that production Google is wholly disabled. It does not rewrite older test results or mark unfinished work complete.

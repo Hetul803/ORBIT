@@ -1,16 +1,44 @@
 # ORBIT: durable Google sync and conversational-agent update
 
-Evidence checkpoint: October 12, 2026, 13:05 Chicago. This report updates, rather than erases, the historical [founder feedback inventory](FOUNDER_FEEDBACK_20261012.md) and [original build audit](BUILD_AND_LAUNCH_AUDIT.md).
+Evidence checkpoint: October 12, 2026, 13:25 Chicago. This report updates, rather than erases, the historical [founder feedback inventory](FOUNDER_FEEDBACK_20261012.md) and [original build audit](BUILD_AND_LAUNCH_AUDIT.md).
 
 ## Outcome and release state
 
-The founder has now confirmed both a real Google connection on the installed iPhone and successful **My agent** replies after the approved OpenRouter key replacement. The first Gmail import failed after approximately 200 messages; its successful completion is **not** claimed. The installed app still has the old chat form.
+The founder has confirmed both a real Google connection on the installed iPhone and successful **My agent** replies after the approved OpenRouter key replacement. The first Gmail import failed after approximately 200 messages; its successful completion is **not** claimed. His last phone result still showed the old chat form; acceptance of this newest update remains pending.
 
-This new sprint implements a real conversation screen, a categorized read-only inbox and server-owned, resumable Google synchronization. **These changes are local/tested, not yet deployed or published to the phone.** They require the separate, exact-source deployment approval. The approved key-only API/worker restarts have already succeeded; they did not include this new UI or migration.
+This sprint implements a real conversation screen, a categorized read-only inbox and server-owned, resumable Google synchronization. The founder approved the exact release: **74cea03407ab18380f162d14ee464ca9b31d027a is now deployed to the existing API/worker, production migration 17 applied, and its inspected matching iOS-only update is published to the installed TestFlight build's production channel/runtime 0.1.0.** Actual manifest and delivered bundle SHA-256 match the prepared artifact. The phone must download/load the update; its new UI and real-mailbox completion are not yet physically confirmed.
 
 The latest fresh isolated regression suite passes **194 tests, zero failures and zero skipped**. Root lint and typecheck pass. No production/founder database was seeded or wiped. This is evidence of the named automated checks, not a claim that every original requirement or native-device interaction works.
 
 Public signup and moderation staffing gates remain closed. Google remains External/Testing, with only the two approved test emails. This is not Google verification, a public TestFlight link, an App Store/Play release, or permission to invite strangers.
+
+## Approved release and delivery evidence
+
+| Check                    | Actual result                                                                                                                                                                                                                       |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Source                   | `74cea03407ab18380f162d14ee464ca9b31d027a`, pushed and pinned for API/worker; deployment metadata matches exactly.                                                                                                                  |
+| API                      | `99707621-4426-40e1-9f53-426ebfb23ed1`, SUCCESS.                                                                                                                                                                                    |
+| Worker                   | `6230a316-0018-42c1-8387-19d79fd2883e`, SUCCESS.                                                                                                                                                                                    |
+| Migration                | Production pre-deploy log: 17 migrations found, `202610120017_durable_google_sync` applied, all migrations successfully applied. No seed or destructive SQL.                                                                        |
+| Backend health           | All four services online, one running replica each; final one-hour status has zero current issues/failures and no pending work. Readiness HTTP 200/database ready.                                                                  |
+| Protected routes         | `/v1/mail` and `/v1/connections/gmail/status` return controlled HTTP 401 without authentication; no email or tokens disclosed. This is an authorization check, not an authenticated founder-import test.                            |
+| Admission                | HTTP 200, capacity 100, `acceptingNewAccounts:false`, `waitlistAvailable:true`, `reason:safety_coverage`.                                                                                                                           |
+| iOS update group         | [9b4778f6-536d-42db-aef2-d25cec18ac6c](https://expo.dev/accounts/hetul/projects/orbit/updates/9b4778f6-536d-42db-aef2-d25cec18ac6c), iOS only, production runtime 0.1.0.                                                            |
+| iOS update ID            | `01a1315c-2473-73ad-b677-c471ecea9f5e`. Production manifest and launch asset both returned HTTP 200 at 13:25 Chicago.                                                                                                               |
+| Delivered bundle         | 5,229,000 bytes; SHA-256 `9e3ff34452001f673cf3f07a91dcc02e24da252611d433d0b5da337875d5b4ea`, identical to the inspected artifact.                                                                                                   |
+| Source map               | Matching ORBIT mobile source map uploaded; debug ID `e35b4b44-cdf7-40b3-a4ce-e967089accdf`. API/worker release labels are `orbit@0.1.0+74cea03`. A source-map upload is not a passing physical crash test.                          |
+| Bundle/privacy           | 44 exported files scanned against current private credentials; none found. Native startup guard, global sync observer, chat and inbox controls are present. Only public mobile endpoints/project ID/public Sentry DSN are injected. |
+| Unchanged infrastructure | API/worker remain 0.25 CPU / 500 MB / one replica in us-west2. API alone is public; no worker domain/TCP proxy, no data-store exposure or new service/volume/plan.                                                                  |
+
+Seven staged fields affected only the two source pins/redundant unchanged worker source fields and their Sentry release labels. No provider secret, Google grant/scope, resource limit, network setting or admission/staffing variable was changed. The existing dashboard route was used under the founder's deployment approval. During replacement an old API instance briefly appeared as CRASHED, then REMOVED; the final current status has no failures/issues. No new-build crash is claimed or concealed.
+
+EAS displays `74cea03*` because the checkout includes untracked/excluded local evidence; tracked source was clean at publication. The independently inspected export, published update and downloaded SHA establish the actual artifact. This did not rebuild the embedded native IPA or publish Android.
+
+Later recheck, October 12 at 23:19 Chicago: the same exact-source API/worker remain online, all four services have one running replica and zero issues/recent failures/pending operations; readiness returns 200 and public admission is still closed at capacity 100. A workstation DNS/connector failure during a preceding check was transient and resolved without changing network settings or redeploying. It was not evidence of an ORBIT server failure.
+
+![Closed backend online after approved sync/chat release](screenshots/public-alpha/sync-chat-backend-online.png)
+
+![Matching iOS-only update published](screenshots/public-alpha/sync-chat-ios-update-published.png)
 
 ## What the new chat changes
 
@@ -87,7 +115,7 @@ Catch generation in this runner explicitly disables model extraction. **No backg
 | `POST /v1/life/ask`                | Existing source-grounded lookup; displayed in the same conversation surface without silently forwarding its result to the personal provider.                                                                                                                                             |
 | `google.sync_progress`             | Advisory realtime invalidation with empty payload; clients refetch protected routes.                                                                                                                                                                                                     |
 
-Additive migration **202610120017_durable_google_sync** adds nullable run/state/lease/retry/error fields, an attempt count and an index to Connection. It was applied to the local primary database and isolated QA databases only. **Production still has 16 migrations at this checkpoint.** No destructive schema change, new provider scope, new queue service or account reseed is needed. API deployment must apply migration 17 before new code starts. Older mobile clients can start a 202 job but do not have the new progress presentation, so the matching iOS update is part of the release plan.
+Additive migration **202610120017_durable_google_sync** adds nullable run/state/lease/retry/error fields, an attempt count and an index to Connection. It is applied to the local primary database, isolated QA databases and now production through the approved API pre-deploy command. Production has all **17 migrations** applied. No destructive schema change, new provider scope, new queue service or account reseed occurred. Older mobile clients can start a 202 job but do not have the new progress presentation; the matching published iOS update provides it.
 
 ## Verification evidence
 
@@ -108,17 +136,19 @@ New database-backed tests prove immediate queue response without Google reads, d
 
 Mobile regressions verify optimistic user bubbles, disabled duplicate sends, transient conversation retention across remounts, personal/mail history separation, owner reset and discarded stale replies. The real browser preview at 390×844 verifies conversation/source-response layout, categorized empty state and back navigation. Its Google/model adapters are deliberately disabled/stubbed; empty synthetic results are not genuine founder inbox results.
 
+A real browser check typed a 1,710-character, 30-line synthetic draft: the composer remained 54 pixels tall with a 130-pixel CSS maximum and internal scroll height of 1,175 pixels. The draft was cleared without sending. This verifies bounded web input, not native iOS keyboard behavior.
+
 An authenticated live diagnostic with a fictional owner and empty test database returned HTTP 200 through OpenRouter using `openai/gpt-4.1-mini`: 273 input tokens, 28 output tokens, recorded estimated cost **0.0154 cents ($0.000154)**. No founder mailbox or private writing was sent by that diagnostic. Separately, the founder confirmed a reply in his installed iPhone app after the replacement. This establishes one successful live flow, not universal provider reliability or personalization quality.
 
 ![Phone-sized local conversation with source-lookup response](screenshots/public-alpha/sync-chat-source-response-preview.png)
 
-## Already-live key replacement and unchanged operating limits
+## Earlier key replacement and unchanged operating limits
 
 The approved OpenRouter replacement was transferred only to the existing ORBIT API and worker. The worker uses the API's private reference. Both restarts succeeded:
 
 - API deployment: `57b4749f-f62c-4bae-abdc-bdbb8362c8c3`.
 - Worker deployment: `21680edc-7399-4785-a76b-6b3901c9a8c1`.
-- Deployment source metadata: `5c09378ade0788b81274c867f909c87bd6beca6b`. Its API/worker/packages/infra source is identical to the previously approved `3b37c47` repair; the intervening differences are web-only/doc changes. This sprint's uncommitted code was not included.
+- Earlier key-only deployment source metadata: `5c09378ade0788b81274c867f909c87bd6beca6b`. Its API/worker/packages/infra source is identical to the previously approved `3b37c47` repair; the intervening differences are web-only/doc changes. Those earlier key-only deployments did not include the new sprint. They are now replaced by the successful exact-source deployments above.
 - API readiness returned HTTP 200/database ready after those restarts. The founder now confirms native chat success.
 - Single replicas, 0.25 CPU/500 MB API and worker caps, private worker/Redis/Postgres, existing volumes, closed signup/coverage gates, 100-account ceiling, 10 cents/user/day and 50 cents shared/day model limits, and zero worker model allowance remain unchanged. Limits are allowances, not proof of an actual monthly bill below $100.
 
@@ -133,9 +163,9 @@ node scripts/set-openrouter-key.mjs
 
 It reads the key through a hidden terminal prompt, avoids command history/arguments, changes only the root `.env` key assignment and saves atomically at mode 0600. Three tests cover preservation/duplicate handling and invalid-input refusal. **Running it does not transfer a key to production.** Never paste a key into chat. The current replacement has already been performed and transferred under approval.
 
-## What remains before this sprint is live and before public launch
+## Phone acceptance and remaining public-launch gates
 
-This sprint still needs approved exact-source API/worker deployment, additive production migration 17 and a matching inspected iOS-only update. After publication, phone acceptance must verify long replies stay in the message list, composer/keyboard/safe area, navigation and conversation retention, then Sync/leave-screen/background/retry/full bounded Gmail completion on the real account. A browser screenshot or mocked 2,000-message test is not that physical acceptance.
+The approved deployment, production migration and iOS publication/delivery checks are complete. Phone acceptance must still verify long replies stay in the message list, composer/keyboard/safe area, navigation and conversation retention, then Sync/leave-screen/background/retry/full bounded Gmail completion on the real account. A browser screenshot or mocked 2,000-message test is not that physical acceptance. Open ORBIT online for about 10 seconds, force-close and reopen once; do not reinstall just to fetch this update. Start Sync in You → Connected accounts, then switch to Today. Report only progress counts or safe error text, never private email/chat contents or codes.
 
 The broader original build still has the launch gaps recorded in the linked audits: faithful agent representation/adaptive onboarding and readiness gating (issue #36); real multi-user matching/fidelity and useful sparse-network outcomes; verified Google release/security-assessment requirements; corrected embedded native binaries for clean/offline installs; public distribution/store review; Android identity/device/phone/testing requirements; physical push and moderation email/push drill with actual 15/60-minute staffing; complete native offline/delete/export/error flows; and unresolved dependency/security review items. No store submission, staffing claim or verification flag was fabricated in this sprint.
 
