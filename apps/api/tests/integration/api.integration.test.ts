@@ -100,6 +100,19 @@ describe.runIf(enabled)('ORBIT API integration', () => {
       expect(response.headers['content-type']).toContain('text/html');
       expect(response.body).toContain('ORBIT');
     }
+    const privacy = await app.inject({ method: 'GET', url: '/privacy' });
+    for (const disclosure of [
+      'Effective October 13, 2026',
+      'Separate connected accounts',
+      'Microsoft mail and calendar',
+      'Optional account-aware model use',
+      'ACCOUNT_MODEL_CONTEXT_ENABLED=false',
+      'Allow email context and prepare draft',
+      'Local calendar reminders',
+      'No automatic access to private phone messaging',
+    ]) {
+      expect(privacy.body).toContain(disclosure);
+    }
   });
 
   it('rejects an unapproved browser origin as a controlled 403, never a server 500', async () => {
