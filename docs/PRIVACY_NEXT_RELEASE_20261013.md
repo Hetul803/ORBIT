@@ -1,6 +1,6 @@
 # Proposed privacy disclosure changes for the account-aware release
 
-Draft for founder review, October 13, 2026. **Not the currently published policy and not an attestation that provider review is complete.** The existing policy must be updated on `orbitapp.world/privacy/` and in the app before the new connected-model features are enabled.
+Reviewed disclosure delta, October 13, 2026. The founder explicitly approved publication, and these disclosures are now published on `orbitapp.world/privacy/` (Sites version 5) and the live API `/privacy` used by the app. This file records the approved delta; [the complete current policy](PRIVACY.md) contains the existing disclosures as well. **Publication is not an attestation that provider settings, verification or independent legal review is complete. Connected-model processing remains off.** See the [verified closed-alpha release record](DAY_ONE_RELEASE_20261013.md).
 
 ## Separate connected accounts
 
@@ -35,4 +35,4 @@ ORBIT does not read iPhone Messages or a WhatsApp inbox automatically. Voice lea
 - [OpenRouter ZDR routing and limitations](https://openrouter.ai/docs/guides/features/zdr)
 - [Microsoft delegated permissions](https://learn.microsoft.com/en-us/graph/permissions-reference)
 
-Founder/operator review, publication evidence, current provider settings and independent legal review remain outstanding. This draft must not be presented as a Google or Microsoft verification approval.
+Founder publication approval and deployment evidence are recorded. Current model-provider settings/processing terms, public Google/Microsoft verification and independent legal review remain outstanding. This disclosure update must not be presented as a Google or Microsoft verification approval.
