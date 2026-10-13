@@ -43,6 +43,12 @@ const environmentSchema = z.object({
   TWILIO_AUTH_TOKEN: z.string().optional(),
   TWILIO_FROM_PHONE: z.string().optional(),
   GMAIL_INTEGRATION_ENABLED: z.enum(['true', 'false']).default('false'),
+  MICROSOFT_INTEGRATION_ENABLED: z.enum(['true', 'false']).default('false'),
+  MICROSOFT_OAUTH_CLIENT_ID: z.string().optional(),
+  MICROSOFT_OAUTH_CLIENT_SECRET: z.string().optional(),
+  MICROSOFT_OAUTH_REDIRECT_URI: optionalUrl,
+  MICROSOFT_TEST_USER_EMAILS: z.string().default(''),
+  ACCOUNT_MODEL_CONTEXT_ENABLED: z.enum(['true', 'false']).default('false'),
   SEARCH_API_ENDPOINT: z.url().default('https://api.search.brave.com/res/v1/web/search'),
   SEARCH_API_KEY: z.string().optional(),
   GOOGLE_OAUTH_CLIENT_ID: z.string().optional(),
@@ -82,6 +88,21 @@ const productionError = (name: string, requirement: string): never => {
 
 const assertProductionConfig = (config: ApiConfig): void => {
   if (config.NODE_ENV !== 'production') return;
+  if (config.MICROSOFT_INTEGRATION_ENABLED === 'true') {
+    if (
+      !config.MICROSOFT_OAUTH_CLIENT_ID ||
+      !config.MICROSOFT_OAUTH_CLIENT_SECRET ||
+      !config.MICROSOFT_OAUTH_REDIRECT_URI?.startsWith('https://') ||
+      !config.MICROSOFT_TEST_USER_EMAILS.split(',').some(
+        (email) => z.email().safeParse(email.trim()).success,
+      )
+    ) {
+      productionError(
+        'MICROSOFT_OAUTH_CLIENT_ID/CLIENT_SECRET/REDIRECT_URI/TEST_USER_EMAILS',
+        'must configure explicit HTTPS founder-only Microsoft testing',
+      );
+    }
+  }
   if (
     config.TRUSTED_PROXY_CIDRS.split(',').some((entry) =>
       ['true', '*', '0.0.0.0/0', '::/0'].includes(entry.trim()),

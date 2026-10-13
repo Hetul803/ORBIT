@@ -21,6 +21,8 @@ import { registerAdmissionRoutes } from './routes/admission.js';
 import { registerCoreRoutes } from './routes/core.js';
 import { registerGmailRoutes } from './routes/gmail.js';
 import { registerGoogleSyncRunner } from './google-sync.js';
+import { registerMicrosoftSyncRunner } from './microsoft-sync.js';
+import { registerOutlookRoutes } from './routes/outlook.js';
 import { registerLegalRoutes } from './routes/legal.js';
 import { registerLifeRoutes } from './routes/life.js';
 import { registerPushRoutes } from './routes/push.js';
@@ -170,6 +172,8 @@ export const buildApp = async (db: PrismaClient, config: ApiConfig): Promise<Fas
   registerProactiveRoutes(app, services);
   registerGmailRoutes(app, services);
   registerGoogleSyncRunner(app, services);
+  registerOutlookRoutes(app, services);
+  registerMicrosoftSyncRunner(app, services);
   registerLifeRoutes(app, services);
   registerPushRoutes(app, services);
   registerSocialRoutes(app, services);

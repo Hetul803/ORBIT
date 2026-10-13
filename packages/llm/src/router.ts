@@ -89,6 +89,16 @@ export class ModelRouter {
         finalError = new Error(`Unknown LLM provider: ${attempt.provider}`);
         continue;
       }
+      if (
+        request.constraints.privateAccountContext === true &&
+        provider.name !== 'openrouter' &&
+        provider.name !== 'stub'
+      ) {
+        finalError = new Error(
+          'PRIVATE_CONTEXT_PROVIDER_UNSUPPORTED: connected account context requires enforced private routing',
+        );
+        continue;
+      }
 
       for (let retry = 0; retry <= this.config.maxRetries; retry += 1) {
         const startedAt = Date.now();

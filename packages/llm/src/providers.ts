@@ -127,6 +127,9 @@ export class OpenRouterProvider implements LlmProvider {
       })),
       max_tokens: request.constraints.maxOutputTokens,
       temperature: request.constraints.temperature,
+      ...(request.constraints.privateAccountContext === true
+        ? { provider: { data_collection: 'deny', zdr: true } }
+        : {}),
       ...(request.constraints.jsonMode === true
         ? { response_format: { type: 'json_object' as const } }
         : {}),

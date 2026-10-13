@@ -1,8 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { configFromEnvironment, CostCapError, ModelRouter } from '../src/router.js';
 import { OpenRouterCatalogPriceResolver } from '../src/openrouter-catalog.js';
-import { StubProvider } from '../src/providers.js';
+import { OpenRouterProvider, StubProvider } from '../src/providers.js';
 import type { CostLedger, LlmProvider, ModelCallRecord, ModelRouterConfig } from '../src/types.js';
 
 class Ledger implements CostLedger {
@@ -119,6 +119,54 @@ const request = {
 };
 
 describe('provider router', () => {
+  it('never forwards private account context to an unsupported provider or fallback', async () => {
+    const rejectedProviderCall = vi.fn();
+    const unsupported: LlmProvider = { name: 'broken', complete: rejectedProviderCall };
+    const ledger = new Ledger();
+    const router = new ModelRouter(
+      config,
+      new Map([
+        ['broken', unsupported],
+        ['stub', new StubProvider()],
+      ]),
+      ledger,
+    );
+    const result = await router.complete({
+      ...request,
+      constraints: { ...request.constraints, privateAccountContext: true },
+    });
+    expect(rejectedProviderCall).not.toHaveBeenCalled();
+    expect(result.provider).toBe('stub');
+    expect(ledger.calls).toHaveLength(1);
+  });
+  it('enforces deny-data-collection and ZDR in the actual OpenRouter request body', async () => {
+    const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: 'fixture',
+          choices: [{ message: { content: 'Fixture reply' }, finish_reason: 'stop', index: 0 }],
+          usage: { prompt_tokens: 4, completion_tokens: 2 },
+        }),
+        { headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    try {
+      await new OpenRouterProvider('fictional-not-a-real-key').complete({
+        model: 'fictional/model',
+        messages: request.messages,
+        constraints: { ...request.constraints, privateAccountContext: true },
+      });
+      const sent = fetcher.mock.calls[0]?.[0];
+      const rawBody = fetcher.mock.calls[0]?.[1]?.body;
+      const body =
+        sent instanceof Request
+          ? await sent.clone().json()
+          : JSON.parse(typeof rawBody === 'string' ? rawBody : '{}');
+      expect(body.provider).toEqual({ data_collection: 'deny', zdr: true });
+    } finally {
+      fetcher.mockRestore();
+    }
+  });
   it('loads auditable generic and per-task model prices from the environment', () => {
     const loaded = configFromEnvironment({
       LLM_DEFAULT_PROVIDER: 'openai',

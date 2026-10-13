@@ -163,7 +163,7 @@ describe('founder feedback journeys', () => {
     });
     expect(screen.getByRole('button', { name: 'Send to my agent' })).toBeDisabled();
     expect(apiMock.mock.calls.filter(([path]) => path === '/v1/agent/chat')).toHaveLength(0);
-    fireEvent.click(screen.getByRole('button', { name: 'Allow my context for this chat' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Allow reviewed context for this chat' }));
     fireEvent.click(screen.getByRole('button', { name: 'Send to my agent' }));
     expect(
       await screen.findByText('Let’s protect one quiet morning and leave Saturday open.'),
@@ -175,6 +175,8 @@ describe('founder feedback journeys', () => {
           message: 'Help me plan my week.',
           contextConsent: true,
           history: [],
+          includeConnectedContext: false,
+          connectedContextConsent: false,
         }),
       }),
     );
@@ -228,10 +230,10 @@ describe('founder feedback journeys', () => {
     ]);
   });
   it('keeps the conversation/composer across screen remounts and never leaks mailbox answers into model history', async () => {
-    apiMock.mockImplementation(async (path: string) =>
+    apiMock.mockImplementation(async (path: string, init?: RequestInit) =>
       path === '/v1/agent'
-        ? { name: 'Morrow' }
-        : path === '/v1/life/ask'
+        ? { name: 'Morrow', connectedContextAvailable: true }
+        : JSON.parse(String(init?.body ?? '{}')).includeConnectedContext
           ? { answer: 'PRIVATE FAKE MAIL RESULT', sources: [] }
           : { answer: 'A useful personal reply.' },
     );
@@ -242,7 +244,11 @@ describe('founder feedback journeys', () => {
         <Ask />
       </QueryClientProvider>,
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Mail & Calendar' }));
+    await screen.findByText('Morrow');
+    fireEvent.click(
+      screen.getByRole('checkbox', { name: 'Include synced mail and calendar summaries' }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Allow reviewed context for this chat' }));
     fireEvent.change(screen.getByLabelText('Message your agent'), {
       target: { value: 'What am I forgetting today?' },
     });
@@ -251,16 +257,16 @@ describe('founder feedback journeys', () => {
     view.unmount();
     renderQuery(<Ask />);
     expect(screen.getByText('PRIVATE FAKE MAIL RESULT')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'My agent' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Allow my context for this chat' }));
+    act(() => useChatSession.setState({ consent: false, includeConnected: false }));
+    fireEvent.click(screen.getByRole('button', { name: 'Allow reviewed context for this chat' }));
     fireEvent.change(screen.getByLabelText('Message your agent'), {
       target: { value: 'Help me think about my day.' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Send to my agent' }));
     await screen.findByText('A useful personal reply.');
     const calls = apiMock.mock.calls.filter(([path]) => path === '/v1/agent/chat');
-    expect(JSON.parse(calls[0]?.[1].body ?? '{}').history).toEqual([]);
-    expect(JSON.stringify(calls)).not.toContain('PRIVATE FAKE MAIL RESULT');
+    expect(JSON.parse(calls[1]?.[1].body ?? '{}').history).toEqual([]);
+    expect(JSON.stringify(calls[1])).not.toContain('PRIVATE FAKE MAIL RESULT');
   });
   it('shows a pending user bubble immediately, preserves failed input, and drops late replies after an owner reset', async () => {
     let resolveReply: (value: unknown) => void = () => undefined;
@@ -272,7 +278,7 @@ describe('founder feedback journeys', () => {
           }),
     );
     renderQuery(<Ask />);
-    fireEvent.click(screen.getByRole('button', { name: 'Allow my context for this chat' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Allow reviewed context for this chat' }));
     fireEvent.change(screen.getByLabelText('Message your agent'), {
       target: { value: 'Let’s make a plan.' },
     });

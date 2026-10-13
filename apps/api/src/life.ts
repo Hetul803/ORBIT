@@ -2,11 +2,22 @@ import {
   LifeItemKind,
   LifeItemStatus,
   SourceDocumentDirection,
-  SourceDocumentKind,
+  type SourceDocumentKind,
   type Prisma,
 } from '@orbit/db';
 
 import type { Services } from './services.js';
+import {
+  activeAccountSources,
+  accountSourceSelect,
+  emailKinds,
+  calendarKinds,
+  scopedThreadKey,
+  sourceProvider,
+  providerName,
+  lockAccountData,
+  accountModelContextAvailable,
+} from './linked-accounts.js';
 
 export interface SourceCitation {
   readonly sourceId: string;
@@ -15,6 +26,9 @@ export interface SourceCitation {
   readonly url: string;
   readonly quote: string;
   readonly occurredAt: string | null;
+  readonly connectionId?: string | null;
+  readonly provider?: 'google' | 'microsoft';
+  readonly accountEmail?: string | null;
 }
 
 interface SourceDocumentView {
@@ -29,6 +43,8 @@ interface SourceDocumentView {
   readonly occurredAt: Date | null;
   readonly body: string;
   readonly metadata: unknown;
+  readonly connectionId?: string | null;
+  readonly connection?: { accountEmail: string | null } | null;
 }
 
 interface ProposedLifeItem {
@@ -44,7 +60,10 @@ interface ProposedLifeItem {
 
 const sourceToCitation = (source: SourceDocumentView, quote: string): SourceCitation => ({
   sourceId: source.id,
-  kind: source.kind === SourceDocumentKind.GMAIL_MESSAGE ? 'email' : 'calendar',
+  kind: emailKinds.includes(source.kind) ? 'email' : 'calendar',
+  connectionId: source.connectionId ?? null,
+  provider: providerName(sourceProvider(source.kind)),
+  accountEmail: source.connection?.accountEmail ?? null,
   title: source.title,
   url: source.sourceUrl,
   quote: quote.slice(0, 360),
@@ -72,7 +91,7 @@ const automatedSender = (source: SourceDocumentView): boolean =>
 const ageInDays = (value: Date | null, now: Date): number =>
   value === null ? 0 : Math.floor((now.getTime() - value.getTime()) / 86_400_000);
 
-const threadKey = (source: SourceDocumentView): string => source.threadId ?? source.id;
+const threadKey = scopedThreadKey;
 
 const lifeItemCandidate = (
   source: SourceDocumentView,
@@ -166,7 +185,7 @@ const lifeItemCandidate = (
 
 const calendarConflicts = (sources: readonly SourceDocumentView[]): readonly ProposedLifeItem[] => {
   const events = sources
-    .filter((source) => source.kind === SourceDocumentKind.GOOGLE_CALENDAR_EVENT)
+    .filter((source) => calendarKinds.includes(source.kind))
     .map((source) => {
       const metadata =
         typeof source.metadata === 'object' && source.metadata !== null
@@ -174,10 +193,17 @@ const calendarConflicts = (sources: readonly SourceDocumentView[]): readonly Pro
           : {};
       const start = typeof metadata.start === 'string' ? new Date(metadata.start) : null;
       const end = typeof metadata.end === 'string' ? new Date(metadata.end) : null;
-      return { source, start, end };
+      return {
+        source,
+        start,
+        end,
+        uid: typeof metadata.iCalUID === 'string' ? metadata.iCalUID : null,
+      };
     })
     .filter(
-      (event): event is { source: SourceDocumentView; start: Date; end: Date } =>
+      (
+        event,
+      ): event is { source: SourceDocumentView; start: Date; end: Date; uid: string | null } =>
         event.start !== null && event.end !== null && event.end > event.start,
     )
     .sort((left, right) => left.start.getTime() - right.start.getTime());
@@ -187,6 +213,14 @@ const calendarConflicts = (sources: readonly SourceDocumentView[]): readonly Pro
     const second = events[index + 1];
     if (first === undefined || second === undefined) continue;
     if (second.start >= first.end) continue;
+    // The same invitation can appear on two calendars. Retain both sources without inventing a conflict.
+    if (
+      first.uid &&
+      first.uid === second.uid &&
+      first.start.getTime() === second.start.getTime() &&
+      first.end.getTime() === second.end.getTime()
+    )
+      continue;
     result.push({
       kind: LifeItemKind.CATCH,
       stableKey: `calendar-conflict:${first.source.id}:${second.source.id}`,
@@ -209,7 +243,7 @@ const draftFor = async (
   source: SourceDocumentView,
   requestId?: string,
 ): Promise<string | null> => {
-  if (!messageNeedsReply(source)) return null;
+  if (!messageNeedsReply(source) || !accountModelContextAvailable(services)) return null;
   try {
     const completion = await services.llm.complete({
       task: 'draft',
@@ -226,8 +260,9 @@ const draftFor = async (
           content: `From: ${source.sender ?? 'unknown'}\nSubject: ${source.title}\nThe original body is not retained.`,
         },
       ],
-      constraints: { maxOutputTokens: 260, temperature: 0.2 },
+      constraints: { maxOutputTokens: 260, temperature: 0.2, privateAccountContext: true },
     });
+    if (completion.provider === 'stub') return null;
     const draft = completion.text.trim();
     return draft.length === 0 ? null : draft.slice(0, 3_000);
   } catch {
@@ -242,7 +277,8 @@ export const refreshLifeItems = async (
   generateDrafts = true,
 ): Promise<number> => {
   const sources = (await services.db.sourceDocument.findMany({
-    where: { userId, deletedAt: null },
+    where: activeAccountSources(userId),
+    include: { connection: { select: accountSourceSelect } },
     orderBy: { occurredAt: 'desc' },
     take: 2_500,
   })) as SourceDocumentView[];
@@ -256,55 +292,67 @@ export const refreshLifeItems = async (
   const now = new Date();
   const proposed = [
     ...sources
-      .filter((source) => source.kind === SourceDocumentKind.GMAIL_MESSAGE)
+      .filter((source) => emailKinds.includes(source.kind))
       .map((source) => lifeItemCandidate(source, byThread, now))
       .filter((item): item is ProposedLifeItem => item !== null),
     ...calendarConflicts(sources),
   ].slice(0, 40);
-  const activeKeys = new Set(proposed.map((item) => item.stableKey));
-  const current = await services.db.lifeItem.findMany({
-    where: { userId, status: LifeItemStatus.ACTIVE, deletedAt: null },
-    select: { id: true, stableKey: true },
-  });
-  await services.db.$transaction(
-    current
-      .filter((item) => !activeKeys.has(item.stableKey))
-      .map((item) =>
-        services.db.lifeItem.update({
-          where: { id: item.id },
-          data: { status: LifeItemStatus.COMPLETED },
-        }),
-      ),
-  );
+  const drafts = new Map<string, string | null>();
   for (const item of proposed) {
-    const draft =
+    drafts.set(
+      item.stableKey,
       !generateDrafts || item.draftForSource === undefined
         ? null
-        : await draftFor(services, userId, item.draftForSource, requestId);
-    await services.db.lifeItem.upsert({
-      where: { userId_stableKey: { userId, stableKey: item.stableKey } },
-      update: {
-        title: item.title,
-        detail: item.detail,
-        evidence: item.evidence as unknown as Prisma.InputJsonValue,
-        confidence: item.confidence,
-        ...(item.dueAt === undefined ? {} : { dueAt: item.dueAt }),
-        ...(draft === null ? {} : { draft }),
-      },
-      create: {
-        userId,
-        kind: draft === null ? item.kind : LifeItemKind.DRAFT,
-        stableKey: item.stableKey,
-        title: item.title,
-        detail: item.detail,
-        evidence: item.evidence as unknown as Prisma.InputJsonValue,
-        confidence: item.confidence,
-        ...(item.dueAt === undefined ? {} : { dueAt: item.dueAt }),
-        ...(draft === null ? {} : { draft }),
-      },
-    });
+        : await draftFor(services, userId, item.draftForSource, requestId),
+    );
   }
-  return proposed.length;
+  return services.db.$transaction(async (tx) => {
+    await lockAccountData(tx, userId);
+    const activeIds = new Set(
+      (
+        await tx.sourceDocument.findMany({
+          where: activeAccountSources(userId),
+          select: { id: true },
+        })
+      ).map((s) => s.id),
+    );
+    const valid = proposed.filter((item) => item.evidence.every((e) => activeIds.has(e.sourceId)));
+    await tx.lifeItem.updateMany({
+      where: {
+        userId,
+        status: LifeItemStatus.ACTIVE,
+        deletedAt: null,
+        stableKey: { notIn: valid.map((item) => item.stableKey) },
+      },
+      data: { status: LifeItemStatus.COMPLETED },
+    });
+    for (const item of valid) {
+      const draft = drafts.get(item.stableKey) ?? null;
+      await tx.lifeItem.upsert({
+        where: { userId_stableKey: { userId, stableKey: item.stableKey } },
+        update: {
+          title: item.title,
+          detail: item.detail,
+          evidence: item.evidence as unknown as Prisma.InputJsonValue,
+          confidence: item.confidence,
+          ...(item.dueAt === undefined ? {} : { dueAt: item.dueAt }),
+          ...(draft === null ? {} : { draft }),
+        },
+        create: {
+          userId,
+          kind: draft === null ? item.kind : LifeItemKind.DRAFT,
+          stableKey: item.stableKey,
+          title: item.title,
+          detail: item.detail,
+          evidence: item.evidence as unknown as Prisma.InputJsonValue,
+          confidence: item.confidence,
+          ...(item.dueAt === undefined ? {} : { dueAt: item.dueAt }),
+          ...(draft === null ? {} : { draft }),
+        },
+      });
+    }
+    return valid.length;
+  });
 };
 
 export const lifeItemDto = (item: {
@@ -377,7 +425,8 @@ export const answerLifeQuestion = async (
   question: string,
 ): Promise<Record<string, unknown>> => {
   const sources = (await services.db.sourceDocument.findMany({
-    where: { userId, deletedAt: null },
+    where: activeAccountSources(userId),
+    include: { connection: { select: accountSourceSelect } },
     orderBy: { occurredAt: 'desc' },
     take: 2_500,
   })) as SourceDocumentView[];
@@ -401,7 +450,7 @@ export const answerLifeQuestion = async (
     if (related.length === 0) {
       return {
         answer:
-          'I could not find an active, source-backed item in your connected Gmail or calendar.',
+          'I could not find an active, source-backed item in your connected mail or calendars.',
         sources: [],
         confidence: 0,
       };
@@ -429,7 +478,7 @@ export const answerLifeQuestion = async (
   const first = ranked[0]?.source;
   if (first === undefined) {
     return {
-      answer: 'I could not find evidence for that in your connected Gmail or calendar.',
+      answer: 'I could not find evidence for that in your connected mail or calendars.',
       sources: [],
       confidence: 0,
     };

@@ -1,7 +1,7 @@
 import { FlashList } from '@shopify/flash-list';
 import { useQuery } from '@tanstack/react-query';
 import { router, type Href } from 'expo-router';
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import {
   Button,
@@ -19,7 +19,14 @@ import {
 } from '@orbit/ui';
 
 import { api } from '@/api';
-import { googleSyncActive, useGoogleStatus } from '@/google-sync';
+import {
+  anyGoogleSyncActive,
+  googleAccounts,
+  googleSyncActive,
+  useGoogleStatus,
+} from '@/google-sync';
+import { AgendaPreview } from '@/agenda';
+import { useMicrosoftStatus } from '@/linked-accounts';
 import { AppHeader, EmptyState, Metric, QueryError } from '@/components';
 import type { BriefItem, CurrentUser, DailyBrief } from '@/types';
 import type { LifeItem } from '@/types';
@@ -60,6 +67,7 @@ const BriefCard = ({ item }: { item: BriefItem }): ReactNode => (
 
 export default function Today(): ReactNode {
   const { colors } = useOrbitTheme();
+  const [refreshing, setRefreshing] = useState(false);
   const query = useQuery({
     queryKey: ['brief', 'today'],
     queryFn: () => api<DailyBrief>('/v1/brief/today'),
@@ -75,15 +83,27 @@ export default function Today(): ReactNode {
     queryFn: () => api<{ name: string; identitySeed: string }>('/v1/agent'),
   });
   const google = useGoogleStatus();
+  const microsoft = useMicrosoftStatus();
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
   return (
     <Screen scroll={false} contentStyle={styles.screen}>
       <FlashList
-        data={query.isError ? [] : (brief?.items ?? [])}
+        data={(brief?.items ?? []).filter(
+          (item) =>
+            !(item.kind === 'task' && /account(?:s)? (?:created|creation)/iu.test(item.title)),
+        )}
         keyExtractor={(item) => item.id}
-        refreshing={query.isFetching && !query.isPending}
-        onRefresh={() => void query.refetch()}
+        refreshing={refreshing}
+        onRefresh={() => {
+          setRefreshing(true);
+          void Promise.all([
+            query.refetch(),
+            catchQuery.refetch(),
+            google.refetch(),
+            microsoft.refetch(),
+          ]).finally(() => setRefreshing(false));
+        }}
         contentContainerStyle={styles.list}
         ItemSeparatorComponent={() => <View style={styles.separator} />}
         ListHeaderComponent={
@@ -128,34 +148,73 @@ export default function Today(): ReactNode {
                 />
               </View>
             </Card>
-            <Card tone={google.data?.connected ? 'moss' : 'blue'}>
-              <OrbitText variant="title">
-                {google.data?.connected
-                  ? 'Your accounts are connected'
-                  : 'Bring your day into focus'}
-              </OrbitText>
-              <OrbitText>
-                {google.data?.connected
-                  ? googleSyncActive(google.data.connection?.syncStatus)
-                    ? `Your inbox is arriving: ${String(google.data.connection?.syncProcessed ?? 0)} messages checked. You can keep using ORBIT while sync continues.`
-                    : 'Your read-only inbox is ready to explore. Open a category or ask your agent about your sources.'
-                  : google.data?.available
-                    ? 'Connect Gmail and Calendar to surface real follow-ups and conflicts.'
-                    : 'Gmail and Calendar are coming after Google verification. Your agent can still work with the context you teach it.'}
-              </OrbitText>
-              <Button
-                label="Gmail & Calendar"
-                kind="secondary"
-                onPress={() => router.push('/connections')}
-              />
-              {google.data?.connected ? (
+            {anyGoogleSyncActive(google.data) || anyGoogleSyncActive(microsoft.data) ? (
+              <Card style={{ height: 128, overflow: 'hidden' }}>
+                <OrbitText variant="label">Your inbox is arriving quietly</OrbitText>
+                <OrbitText variant="caption" numberOfLines={2}>
+                  {[
+                    ...googleAccounts(google.data).map((c) => ({ ...c, providerLabel: 'Google' })),
+                    ...googleAccounts(microsoft.data).map((c) => ({
+                      ...c,
+                      providerLabel: 'Microsoft',
+                    })),
+                  ]
+                    .filter((c) => googleSyncActive(c.syncStatus))
+                    .map(
+                      (c) =>
+                        `${c.providerLabel} · ${c.accountEmail ?? 'Connected account'}: ${String(c.syncProcessed)}${c.syncTotal === null ? '' : ' / ' + String(c.syncTotal)} checked`,
+                    )
+                    .join(' · ')}
+                  . Keep using ORBIT while import continues.
+                </OrbitText>
+              </Card>
+            ) : null}
+            {!google.data?.connected ? (
+              <Card tone="blue">
+                <OrbitText variant="title">
+                  {google.data?.connected
+                    ? 'Your accounts are connected'
+                    : 'Bring your day into focus'}
+                </OrbitText>
+                <OrbitText>
+                  {google.data?.connected
+                    ? googleSyncActive(google.data.connection?.syncStatus)
+                      ? `Your inbox is arriving: ${String(google.data.connection?.syncProcessed ?? 0)} messages checked. You can keep using ORBIT while sync continues.`
+                      : 'Your read-only inbox is ready to explore. Open a category or ask your agent about your sources.'
+                    : google.data?.available
+                      ? 'Connect Gmail and Calendar to surface real follow-ups and conflicts.'
+                      : 'Gmail and Calendar are coming after Google verification. Your agent can still work with the context you teach it.'}
+                </OrbitText>
                 <Button
-                  label="Explore my inbox"
-                  onPress={() => router.push('/mail')}
+                  label="Gmail & Calendar"
                   kind="secondary"
+                  onPress={() => router.push('/connections')}
                 />
-              ) : null}
-            </Card>
+                {google.data?.connected ? (
+                  <Button
+                    label="Explore my inbox"
+                    onPress={() => router.push('/mail')}
+                    kind="secondary"
+                  />
+                ) : null}
+              </Card>
+            ) : null}
+            {!microsoft.data?.connected ? (
+              <Card tone="blue">
+                <OrbitText variant="title">Bring Outlook into your orbit</OrbitText>
+                <OrbitText>
+                  {microsoft.data?.available
+                    ? 'Keep Microsoft mail and calendar separate, with one agent to help you across both.'
+                    : 'Outlook connection is being prepared. Your Google accounts stay independent.'}
+                </OrbitText>
+                <Button
+                  label="Outlook & Calendar"
+                  kind="secondary"
+                  onPress={() => router.push('/connections')}
+                />
+              </Card>
+            ) : null}
+            <AgendaPreview />
             {brief === undefined || query.isError ? null : (
               <Card tone="yours" style={styles.summary}>
                 <OrbitText variant="mono">WHILE YOU WERE AWAY</OrbitText>
@@ -195,7 +254,7 @@ export default function Today(): ReactNode {
                   <OrbitText>
                     {catchQuery.data.length > 0
                       ? 'Open source-backed emails, commitments, calendar conflicts, and drafts.'
-                      : google.data?.connected
+                      : google.data?.connected || microsoft.data?.connected
                         ? 'No source-backed follow-ups were found in the last sync.'
                         : 'Connect your accounts when available to get started.'}
                   </OrbitText>

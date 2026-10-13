@@ -10,9 +10,10 @@ import { api, jsonBody } from '@/api';
 import { useGoogleReconnectPrompt } from '@/google-reconnect';
 import { AppHeader, EmptyState, ErrorText, Notice, QueryError } from '@/components';
 import type { LifeItem, SourceCitation } from '@/types';
+import { accountCaption } from '@/account-reference';
 
 const sourceLabel = (source: SourceCitation): string =>
-  `${source.kind === 'calendar' ? 'Calendar' : 'Email'} · ${source.title}`;
+  `${accountCaption(source)} · ${source.kind === 'calendar' ? 'Calendar' : 'Email'} · ${source.title}`;
 
 const formatWhen = (value: string | null): string =>
   value === null ? 'Date unavailable' : new Date(value).toLocaleString();

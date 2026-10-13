@@ -40,15 +40,11 @@ export const subscribeSafetyUpdates = (accessToken: string, apiUrl: string): (()
         const type = (JSON.parse(String(event.data)) as { type?: string }).type;
         if (type === 'safety.suppressed') void refreshSafetySurfaces().catch(() => undefined);
         if (type === 'google.sync_progress') {
-          for (const key of [
-            ['gmail-status'],
-            ['mail'],
-            ['inbox'],
-            ['life', 'catch'],
-            ['brief', 'today'],
-          ])
-            void queryClient.invalidateQueries({ queryKey: key });
+          // The global observer coalesces content refreshes; a batch is not a pull-to-refresh.
+          void queryClient.invalidateQueries({ queryKey: ['gmail-status'] });
         }
+        if (type === 'microsoft.sync_progress')
+          void queryClient.invalidateQueries({ queryKey: ['outlook-status'] });
       } catch {
         /* Never log stream payloads. */
       }

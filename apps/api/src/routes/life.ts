@@ -7,6 +7,8 @@ import { ApiError, parseWith } from '../errors.js';
 import { answerLifeQuestion, lifeItemDto } from '../life.js';
 import type { Services } from '../services.js';
 import { logActivity } from './helpers.js';
+import { agenda } from '../mail-work.js';
+import { requireOwnedAccount } from '../linked-accounts.js';
 
 const idParamsSchema = z.object({ id: z.string().min(8) });
 const askSchema = z.object({ question: z.string().trim().min(3).max(1_000) });
@@ -20,6 +22,19 @@ const activeLifeWhere = () => ({
 });
 
 export const registerLifeRoutes = (app: FastifyInstance, services: Services): void => {
+  app.get('/v1/agenda', async (request) => {
+    const auth = await requireAuth(request, services.config);
+    const query = parseWith(
+      z.object({ connectionId: z.string().min(8).optional() }),
+      request.query,
+    );
+    if (query.connectionId) await requireOwnedAccount(services, auth.id, query.connectionId);
+    return {
+      events: await agenda(services, auth.id, query.connectionId),
+      windowDays: 14,
+      readOnly: true,
+    };
+  });
   app.get('/v1/life/catch', async (request) => {
     const auth = await requireAuth(request, services.config);
     const items = await services.db.lifeItem.findMany({

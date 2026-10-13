@@ -27,6 +27,9 @@ export interface SourceCitation {
   url: string;
   quote: string;
   occurredAt: string | null;
+  provider?: 'google' | 'microsoft';
+  accountEmail?: string | null;
+  connectionId?: string | null;
 }
 
 export interface LifeItem {

@@ -104,6 +104,9 @@ export const useAuthStore = create<AuthState>((set) => ({
     resetChatOwner(null);
     useWaitlistStore.getState().clear();
     set({ accessToken: null, refreshToken: null, onboarded: false, resumeOnboarding: false });
+    void import('./calendar-reminders')
+      .then(({ clearOrbitCalendarReminders }) => clearOrbitCalendarReminders())
+      .catch(() => undefined);
     const [{ queryClient }, { clearOfflineData }] = await Promise.all([
       import('./query'),
       import('./offline'),

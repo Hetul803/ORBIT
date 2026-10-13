@@ -9,6 +9,7 @@ import { Button, Card, OrbitText, Pill, Screen } from '@orbit/ui';
 import { api, configuredApiUrl, download } from '@/api';
 import { AppHeader, ErrorText, Field, Notice, QueryError, RowLink } from '@/components';
 import { defaultPushPreferences, registerPushDevice } from '@/notifications';
+import { CalendarReminderControls, clearOrbitCalendarReminders } from '@/calendar-reminders';
 
 interface DeletionStatus {
   pending: boolean;
@@ -127,6 +128,7 @@ export default function Settings(): ReactNode {
     setError(null);
     try {
       const result = await api<{ deleteAfter: string }>('/v1/me', { method: 'DELETE' });
+      await clearOrbitCalendarReminders();
       setMessage(`Deletion scheduled for ${new Date(result.deleteAfter).toLocaleString()}.`);
       setConfirmDelete(false);
       await client.invalidateQueries({ queryKey: ['deletion-status'] });
@@ -213,6 +215,7 @@ export default function Settings(): ReactNode {
           </>
         )}
       </Card>
+      <CalendarReminderControls />
       <Card>
         <OrbitText variant="mono">MODEL PROVIDER</OrbitText>
         {(['openai', 'anthropic', 'google'] as const).map((value) => (

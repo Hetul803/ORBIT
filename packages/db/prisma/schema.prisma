@@ -146,6 +146,8 @@ enum ConnectionStatus {
 enum SourceDocumentKind {
   GMAIL_MESSAGE
   GOOGLE_CALENDAR_EVENT
+  OUTLOOK_MESSAGE
+  MICROSOFT_CALENDAR_EVENT
 }
 
 enum SourceDocumentDirection {
@@ -833,6 +835,8 @@ model Connection {
   deletedAt           DateTime?
   userId              String
   provider            ConnectionProvider
+  accountKey          String             @default("primary")
+  accountEmail        String?
   scopes              String[]
   encryptedTokens     String
   status              ConnectionStatus   @default(ACTIVE)
@@ -851,8 +855,9 @@ model Connection {
   expiredAt           DateTime?
   reconnectPromptedAt DateTime?
   user                User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sources             SourceDocument[]
 
-  @@unique([userId, provider])
+  @@unique([userId, provider, accountKey])
   @@index([userId])
   @@index([status])
   @@index([syncStatus, syncNextAttemptAt])
@@ -875,6 +880,7 @@ model SourceDocument {
   updatedAt    DateTime                @updatedAt
   deletedAt    DateTime?
   userId       String
+  connectionId String?
   kind         SourceDocumentKind
   direction    SourceDocumentDirection @default(UNKNOWN)
   externalId   String
@@ -888,11 +894,13 @@ model SourceDocument {
   metadata     Json                    @default("{}")
   lastSyncedAt DateTime                @default(now())
   user         User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  connection   Connection?             @relation(fields: [connectionId], references: [id], onDelete: Cascade)
 
   @@unique([userId, kind, externalId])
   @@index([userId, kind, occurredAt])
   @@index([userId, threadId])
   @@index([userId, direction, occurredAt])
+  @@index([connectionId])
 }
 
 model LifeItem {
@@ -1234,6 +1242,7 @@ model OtpChallenge {
   consumedAt DateTime?
   attempts   Int       @default(0)
   ipHash     String?
+  metadata   Json      @default("{}")
   user       User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([email, purpose, expiresAt])

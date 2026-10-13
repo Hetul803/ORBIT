@@ -85,6 +85,7 @@ const jsonState = (state: SyncState): Prisma.InputJsonValue => ({ ...state });
 export const queueGoogleSync = async (
   services: Services,
   userId: string,
+  connectionId?: string,
 ): Promise<{ runId: string; alreadyRunning: boolean }> => {
   requireAvailable(services);
   await requireGoogleUser(services, userId);
@@ -93,6 +94,7 @@ export const queueGoogleSync = async (
     const connection = await tx.connection.findFirst({
       where: {
         userId,
+        ...(connectionId === undefined ? {} : { id: connectionId }),
         provider: ConnectionProvider.GOOGLE,
         status: ConnectionStatus.ACTIVE,
         deletedAt: null,
@@ -200,6 +202,16 @@ export const runGoogleSyncTick = async (services: Services): Promise<boolean> =>
         const profile = await gmailJson('/profile', accessToken);
         state.accountEmail =
           typeof profile.emailAddress === 'string' ? profile.emailAddress.toLowerCase() : '';
+        if (candidate.accountEmail && candidate.accountEmail.toLowerCase() !== state.accountEmail)
+          throw new ApiError(
+            409,
+            'GOOGLE_ACCOUNT_MISMATCH',
+            'Reconnect the Google account originally linked here.',
+          );
+        await services.db.connection.updateMany({
+          where: guard(candidate, lease),
+          data: { accountEmail: state.accountEmail || null },
+        });
         const messages = await gmailMessagesForCatch(accessToken);
         state.messageIds = [
           ...new Set(
@@ -219,12 +231,14 @@ export const runGoogleSyncTick = async (services: Services): Promise<boolean> =>
         while (state.index < end) {
           const messageId = state.messageIds[state.index];
           if (!messageId) break;
+          const externalId =
+            candidate.accountKey === 'primary' ? messageId : `${candidate.id}:${messageId}`;
           const source = await services.db.sourceDocument.findUnique({
             where: {
               userId_kind_externalId: {
                 userId: candidate.userId,
                 kind: SourceDocumentKind.GMAIL_MESSAGE,
-                externalId: messageId,
+                externalId,
               },
             },
           });
@@ -240,13 +254,15 @@ export const runGoogleSyncTick = async (services: Services): Promise<boolean> =>
           const payload = asRecord(message?.payload);
           const subject = source?.title ?? (headerValue(payload, 'Subject') || '(No subject)');
           const from = source?.sender ?? headerValue(payload, 'From');
-          const outbound = source
-            ? source.direction === SourceDocumentDirection.OUTBOUND
-            : state.accountEmail.length > 0 && emailAddress(from) === state.accountEmail;
           const labels = message?.labelIds;
           const safeLabels = Array.isArray(labels)
             ? labels.filter((label): label is string => typeof label === 'string')
             : [];
+          const outbound =
+            safeLabels.includes('SENT') ||
+            (source
+              ? source.direction === SourceDocumentDirection.OUTBOUND
+              : state.accountEmail.length > 0 && emailAddress(from) === state.accountEmail);
           const committed = await services.db.$transaction(async (tx) => {
             const current = await tx.connection.updateMany({
               where: guard(candidate, lease),
@@ -260,6 +276,7 @@ export const runGoogleSyncTick = async (services: Services): Promise<boolean> =>
                   data: {
                     deletedAt: null,
                     lastSyncedAt: new Date(),
+                    connectionId: candidate.id,
                     metadata: {
                       labels: safeLabels,
                       category: categoryForLabels(safeLabels, outbound),
@@ -281,19 +298,23 @@ export const runGoogleSyncTick = async (services: Services): Promise<boolean> =>
                   userId_kind_externalId: {
                     userId: candidate.userId,
                     kind: SourceDocumentKind.GMAIL_MESSAGE,
-                    externalId: messageId,
+                    externalId,
                   },
                 },
                 update: {},
                 create: {
                   userId: candidate.userId,
+                  connectionId: candidate.id,
                   kind: SourceDocumentKind.GMAIL_MESSAGE,
                   direction: outbound
                     ? SourceDocumentDirection.OUTBOUND
                     : SourceDocumentDirection.INBOUND,
-                  externalId: messageId,
-                  threadId: typeof message.threadId === 'string' ? message.threadId : null,
-                  sourceUrl: gmailMessageSourceUrl(messageId),
+                  externalId,
+                  threadId:
+                    typeof message.threadId === 'string'
+                      ? `${candidate.accountKey === 'primary' ? '' : candidate.id + ':'}${message.threadId}`
+                      : null,
+                  sourceUrl: gmailMessageSourceUrl(messageId, state.accountEmail),
                   title: subject,
                   sender: from || null,
                   recipients: headerValue(payload, 'To') || null,
@@ -314,7 +335,7 @@ export const runGoogleSyncTick = async (services: Services): Promise<boolean> =>
             }
             if (message && !outbound) {
               const existing = await tx.inboxItem.findFirst({
-                where: { recipientUserId: candidate.userId, kind: `gmail:${messageId}` },
+                where: { recipientUserId: candidate.userId, kind: `gmail:${externalId}` },
               });
               const rule = rules.find((r) => ruleMatches(asRecord(r.matchOn), from, subject));
               const triage =
@@ -327,7 +348,7 @@ export const runGoogleSyncTick = async (services: Services): Promise<boolean> =>
                 await tx.inboxItem.create({
                   data: {
                     recipientUserId: candidate.userId,
-                    kind: `gmail:${messageId}`,
+                    kind: `gmail:${externalId}`,
                     subject,
                     body: `From: ${from}\n\nOpen the original email to read it. ORBIT does not retain Gmail message bodies.`,
                     triage,
@@ -379,6 +400,7 @@ export const runGoogleSyncTick = async (services: Services): Promise<boolean> =>
                 throw new ApiError(409, 'GMAIL_SYNC_CANCELLED', 'Google access was disconnected.');
               return tx.sourceDocument.upsert(data);
             }),
+          candidate,
         );
         state.phase = 'building_catch';
         if (!(await checkpoint(services, candidate, lease, state, true))) return true;
@@ -430,6 +452,7 @@ export const runGoogleSyncTick = async (services: Services): Promise<boolean> =>
           'GMAIL_RECONNECT_REQUIRED',
           'GMAIL_SYNC_CANCELLED',
           'GOOGLE_VERIFICATION_PENDING',
+          'GOOGLE_ACCOUNT_MISMATCH',
         ].includes(code) || attempts >= 5;
       await services.db.connection.updateMany({
         where: {

@@ -1,5 +1,6 @@
 import {
   ConnectionStatus,
+  ConnectionProvider,
   SourceDocumentDirection,
   SourceDocumentKind,
   type Prisma,
@@ -17,6 +18,9 @@ export interface StoredTokens {
   refreshToken: string;
   accessToken?: string;
   expiresAt?: string;
+  ownerId?: string;
+  provider?: string;
+  accountKey?: string;
 }
 
 export const available = (services: Services): boolean =>
@@ -66,6 +70,7 @@ export const tokenRequest = async (
 ): Promise<Record<string, unknown>> => {
   const response = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
+    redirect: 'error',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
       client_id: services.config.GOOGLE_OAUTH_CLIENT_ID ?? '',
@@ -94,9 +99,47 @@ export const accessTokenFor = async (
   connection: { id: string; encryptedTokens: string },
   requestId?: string,
 ): Promise<string> => {
+  const bound = await services.db.connection.findFirst({
+    where: {
+      id: connection.id,
+      provider: ConnectionProvider.GOOGLE,
+      status: ConnectionStatus.ACTIVE,
+      deletedAt: null,
+      encryptedTokens: connection.encryptedTokens,
+    },
+  });
+  if (!bound)
+    throw new ApiError(
+      409,
+      'GMAIL_SYNC_CANCELLED',
+      'This Google account is disconnected or changed.',
+    );
   const stored = JSON.parse(
     decryptField(connection.encryptedTokens, services.config.FIELD_ENCRYPTION_KEY),
   ) as StoredTokens;
+  if (typeof stored.refreshToken !== 'string')
+    throw new ApiError(409, 'GMAIL_RECONNECT_REQUIRED', 'Reconnect this Google account.');
+  if (
+    stored.provider !== undefined &&
+    (stored.provider !== ConnectionProvider.GOOGLE ||
+      stored.ownerId !== bound.userId ||
+      stored.accountKey !== bound.accountKey)
+  )
+    throw new ApiError(
+      409,
+      'GOOGLE_ACCOUNT_MISMATCH',
+      'This credential does not belong to this Google account.',
+    );
+  if (
+    stored.provider === undefined &&
+    !bound.accountEmail &&
+    (await services.db.sourceDocument.count({ where: { connectionId: bound.id } })) > 0
+  )
+    throw new ApiError(
+      409,
+      'GOOGLE_ACCOUNT_MISMATCH',
+      'This legacy mailbox identity is unknown. Disconnect and reconnect it before reading more messages.',
+    );
   let refreshed: Record<string, unknown>;
   try {
     refreshed = await tokenRequest(services, {
@@ -140,7 +183,23 @@ export const accessTokenFor = async (
   if (typeof refreshed.access_token !== 'string') {
     throw new ApiError(502, 'GOOGLE_TOKEN_FAILED', 'Google did not return an access token.');
   }
+  let accountEmail = bound.accountEmail;
+  if (stored.provider === undefined) {
+    const profile = await gmailJson('/profile', refreshed.access_token);
+    const email =
+      typeof profile.emailAddress === 'string' ? profile.emailAddress.trim().toLowerCase() : '';
+    if (!email || (accountEmail && accountEmail.toLowerCase() !== email))
+      throw new ApiError(
+        409,
+        'GOOGLE_ACCOUNT_MISMATCH',
+        'Google returned a different mailbox. No messages were read.',
+      );
+    accountEmail = email;
+  }
   const next: StoredTokens = {
+    ownerId: bound.userId,
+    provider: ConnectionProvider.GOOGLE,
+    accountKey: bound.accountKey,
     refreshToken: stored.refreshToken,
     accessToken: refreshed.access_token,
     expiresAt: new Date(Date.now() + Number(refreshed.expires_in ?? 3_600) * 1_000).toISOString(),
@@ -148,12 +207,15 @@ export const accessTokenFor = async (
   const saved = await services.db.connection.updateMany({
     where: {
       id: connection.id,
+      userId: bound.userId,
+      provider: ConnectionProvider.GOOGLE,
       status: ConnectionStatus.ACTIVE,
       deletedAt: null,
       encryptedTokens: connection.encryptedTokens,
     },
     data: {
       encryptedTokens: encryptField(JSON.stringify(next), services.config.FIELD_ENCRYPTION_KEY),
+      accountEmail,
       status: ConnectionStatus.ACTIVE,
     },
   });
@@ -273,8 +335,8 @@ export const parseMessageDate = (value: string): Date | null => {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 
-export const gmailMessageSourceUrl = (messageId: string): string =>
-  `https://mail.google.com/mail/u/0/#all/${encodeURIComponent(messageId)}`;
+export const gmailMessageSourceUrl = (messageId: string, accountEmail = ''): string =>
+  `https://mail.google.com/mail/${accountEmail ? `?authuser=${encodeURIComponent(accountEmail)}` : 'u/0/'}#all/${encodeURIComponent(messageId)}`;
 
 export const derivedEmailSignals = (body: string): Record<string, string | boolean | null> => {
   const normalized = body.replaceAll(/\s+/gu, ' ').trim();
@@ -285,6 +347,10 @@ export const derivedEmailSignals = (body: string): Record<string, string | boole
     );
   const renewal = /\b(?:subscription|renewal|renews?|membership|trial ends?)\b/iu.exec(normalized);
   return {
+    receipt:
+      /\b(?:receipt|invoice|order confirmation|purchase confirmed|payment received)\b/iu.test(
+        normalized,
+      ),
     needsReply: /\?|\b(?:could you|can you|please|let me know|would you|are you able)\b/iu.test(
       normalized,
     ),
@@ -323,6 +389,7 @@ export const syncCalendar = async (
   accessToken: string,
   saveCalendar: (data: Prisma.SourceDocumentUpsertArgs) => Promise<unknown> = (data) =>
     services.db.sourceDocument.upsert(data),
+  connection?: { id: string; accountKey: string },
 ): Promise<number> => {
   const start = new Date();
   const end = new Date(start.getTime() + 14 * 86_400_000);
@@ -342,6 +409,8 @@ export const syncCalendar = async (
   for (const event of events) {
     const id = typeof event.id === 'string' ? event.id : undefined;
     if (id === undefined) continue;
+    const externalId =
+      !connection || connection.accountKey === 'primary' ? id : `${connection.id}:${id}`;
     const startData = asRecord(event.start);
     const endData = asRecord(event.end);
     const startValue =
@@ -369,28 +438,44 @@ export const syncCalendar = async (
         userId_kind_externalId: {
           userId,
           kind: SourceDocumentKind.GOOGLE_CALENDAR_EVENT,
-          externalId: id,
+          externalId,
         },
       },
       update: {
+        ...(connection ? { connectionId: connection.id } : {}),
         sourceUrl,
         title,
         occurredAt: new Date(startValue),
         body: description,
-        metadata: { start: startValue, end: endValue, status: event.status ?? null },
+        metadata: {
+          start: startValue,
+          end: endValue,
+          allDay: typeof startData.date === 'string',
+          startDate: startData.date ?? null,
+          endDate: endData.date ?? null,
+          status: event.status ?? null,
+        },
         lastSyncedAt: new Date(),
         deletedAt: null,
       },
       create: {
         userId,
+        ...(connection ? { connectionId: connection.id } : {}),
         kind: SourceDocumentKind.GOOGLE_CALENDAR_EVENT,
         direction: SourceDocumentDirection.UNKNOWN,
-        externalId: id,
+        externalId,
         sourceUrl,
         title,
         occurredAt: new Date(startValue),
         body: description,
-        metadata: { start: startValue, end: endValue, status: event.status ?? null },
+        metadata: {
+          start: startValue,
+          end: endValue,
+          allDay: typeof startData.date === 'string',
+          startDate: startData.date ?? null,
+          endDate: endData.date ?? null,
+          status: event.status ?? null,
+        },
       },
     });
     imported += 1;

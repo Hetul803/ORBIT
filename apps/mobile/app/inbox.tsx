@@ -5,6 +5,7 @@ import { Button, Card, OrbitText, Pill, Screen } from '@orbit/ui';
 
 import { api, jsonBody } from '@/api';
 import { AppHeader, EmptyState, Field, Notice, QueryError } from '@/components';
+import { MailPanel } from '@/mail-panel';
 
 interface InboxItem {
   id: string;
@@ -110,21 +111,30 @@ export default function Inbox(): ReactNode {
   return (
     <Screen>
       <AppHeader
-        title="Approval inbox"
-        subtitle="Your agent can screen and draft. Only you can authorize an external reply."
+        title="Ready for you"
+        subtitle="Useful drafts and the few decisions that need you."
       />
       <Notice
         title="Approval is explicit"
-        detail="Editing a draft does not approve it. The send action creates an immutable receipt."
+        detail="Editing is not approval. Reviewing an approval creates a receipt; no email is sent."
         tone="moss"
       />
+      <MailPanel />
+      <OrbitText variant="title">Other approvals</OrbitText>
       {query.isError ? (
         <QueryError message={query.error.message} onRetry={() => void query.refetch()} />
       ) : (
-        (query.data ?? []).map((item) => <InboxCard key={item.id} item={item} />)
+        (query.data ?? [])
+          .filter((item) => !item.kind.startsWith('gmail:') && !item.kind.startsWith('outlook:'))
+          .map((item) => <InboxCard key={item.id} item={item} />)
       )}
-      {query.data?.length === 0 ? (
-        <EmptyState title="Inbox zero, honestly." detail="Nothing is hidden behind a badge." />
+      {query.data?.filter(
+        (item) => !item.kind.startsWith('gmail:') && !item.kind.startsWith('outlook:'),
+      ).length === 0 ? (
+        <EmptyState
+          title="No other approvals"
+          detail="Email drafts are organized in the views above."
+        />
       ) : null}
       <Button label="Back" onPress={() => router.back()} kind="secondary" />
     </Screen>

@@ -17,7 +17,8 @@ import { ErrorText } from './components';
 import { clearChatSession, resetChatOwner, useChatSession, type ChatTurn } from './chat-session';
 import { offlineScope } from './offline-scope';
 import { useAuthStore } from './store';
-import type { LifeAnswer } from './types';
+import type { SourceCitation } from './types';
+import { accountCaption } from './account-reference';
 
 export const AgentChat = (): ReactNode => {
   const { colors } = useOrbitTheme();
@@ -28,17 +29,29 @@ export const AgentChat = (): ReactNode => {
   const scroll = useRef<ScrollView>(null);
   const agent = useQuery({
     queryKey: ['agent'],
-    queryFn: () => api<{ name: string }>('/v1/agent'),
+    queryFn: () => api<{ name: string; connectedContextAvailable?: boolean }>('/v1/agent'),
   });
+  const accountContextAvailable = agent.data?.connectedContextAvailable === true;
+  useEffect(() => {
+    if (
+      agent.data?.connectedContextAvailable === false &&
+      useChatSession.getState().includeConnected
+    )
+      clearChatSession();
+  }, [agent.data?.connectedContextAvailable]);
   const name = agent.data?.name ?? 'Your agent';
   const send = async (): Promise<void> => {
     const current = useChatSession.getState();
     const input = current.draft.trim();
-    if (current.busy || input.length < 3 || (current.context === 'personal' && !current.consent))
-      return;
+    if (current.busy || input.length < 3 || !current.consent) return;
     const epoch = current.epoch;
     const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-    const turn: ChatTurn = { id, role: 'user', content: input, context: current.context };
+    const turn: ChatTurn = {
+      id,
+      role: 'user',
+      content: input,
+      context: current.includeConnected ? 'accounts' : 'personal',
+    };
     useChatSession.setState({
       turns: [...current.turns, turn].slice(-24),
       draft: '',
@@ -46,32 +59,44 @@ export const AgentChat = (): ReactNode => {
       error: null,
     });
     try {
-      let answer: ChatTurn;
-      if (current.context === 'accounts') {
-        const result = await api<LifeAnswer>('/v1/life/ask', jsonBody({ question: input }));
-        answer = {
-          id: id + '-reply',
-          role: 'assistant',
-          content: result.answer,
-          context: 'accounts',
-          sources: result.sources,
-        };
-      } else {
-        const history = current.turns
-          .filter((t) => t.context === 'personal' && !t.failed)
-          .slice(-8)
-          .map((t) => ({ role: t.role, content: t.content.slice(0, 2000) }));
-        const result = await api<{ answer: string }>(
-          '/v1/agent/chat',
-          jsonBody({ message: input, contextConsent: true, history }),
-        );
-        answer = {
-          id: id + '-reply',
-          role: 'assistant',
-          content: result.answer,
-          context: 'personal',
-        };
-      }
+      const history = current.turns
+        .filter((t) => !t.failed && (current.includeConnected || t.context === 'personal'))
+        .slice(-8)
+        .map((t) => {
+          const sources =
+            t.sources ??
+            current.turns.find((answer) => answer.id === t.id + '-reply')?.sources ??
+            [];
+          return {
+            role: t.role,
+            content: t.content.slice(0, 2000),
+            context: t.context,
+            connectionIds: [
+              ...new Set(
+                sources
+                  .map((s) => s.connectionId)
+                  .filter((id): id is string => typeof id === 'string'),
+              ),
+            ],
+          };
+        });
+      const result = await api<{ answer: string; sources?: SourceCitation[] }>(
+        '/v1/agent/chat',
+        jsonBody({
+          message: input,
+          contextConsent: true,
+          history,
+          includeConnectedContext: current.includeConnected,
+          connectedContextConsent: current.includeConnected,
+        }),
+      );
+      const answer: ChatTurn = {
+        id: id + '-reply',
+        role: 'assistant',
+        content: result.answer,
+        context: current.includeConnected ? 'accounts' : 'personal',
+        ...(result.sources ? { sources: result.sources } : {}),
+      };
       if (
         useChatSession.getState().epoch !== epoch ||
         useChatSession.getState().owner !== current.owner
@@ -100,9 +125,7 @@ export const AgentChat = (): ReactNode => {
           <Icon name="person" size={30} color={colors.yours} />
           <View style={styles.flex}>
             <OrbitText variant="title">{name}</OrbitText>
-            <OrbitText variant="caption">
-              Your private space to think, remember and draft.
-            </OrbitText>
+            <OrbitText variant="caption">Here with you. Your context, your voice.</OrbitText>
           </View>
           <Pressable
             accessibilityRole="button"
@@ -113,20 +136,6 @@ export const AgentChat = (): ReactNode => {
           >
             <Icon name="trash" />
           </Pressable>
-        </View>
-        <View style={styles.contexts}>
-          <Button
-            label="My agent"
-            kind={session.context === 'personal' ? 'primary' : 'quiet'}
-            disabled={session.busy}
-            onPress={() => useChatSession.setState({ context: 'personal', error: null })}
-          />
-          <Button
-            label="Mail & Calendar"
-            kind={session.context === 'accounts' ? 'primary' : 'quiet'}
-            disabled={session.busy}
-            onPress={() => useChatSession.setState({ context: 'accounts', error: null })}
-          />
         </View>
         <ScrollView
           ref={scroll}
@@ -169,7 +178,7 @@ export const AgentChat = (): ReactNode => {
                 style={turn.role === 'user' ? { color: colors.surface } : { color: colors.yours }}
               >
                 {turn.role === 'user' ? 'You' : name}
-                {turn.context === 'accounts' ? ' · Connected sources' : ''}
+
                 {turn.failed ? ' · Not delivered' : ''}
               </OrbitText>
               <OrbitText
@@ -191,6 +200,7 @@ export const AgentChat = (): ReactNode => {
                   style={styles.source}
                 >
                   <OrbitText variant="label">{source.title} ↗</OrbitText>
+                  <OrbitText variant="caption">{accountCaption(source)}</OrbitText>
                   <OrbitText variant="caption">{source.quote}</OrbitText>
                 </Pressable>
               ))}
@@ -198,9 +208,7 @@ export const AgentChat = (): ReactNode => {
           ))}
           {session.busy ? (
             <View accessibilityLiveRegion="polite" style={styles.agent}>
-              <OrbitText variant="label">
-                {name} is {session.context === 'accounts' ? 'checking your sources' : 'thinking'}…
-              </OrbitText>
+              <OrbitText variant="label">{name} is thinking…</OrbitText>
             </View>
           ) : null}
         </ScrollView>
@@ -210,24 +218,39 @@ export const AgentChat = (): ReactNode => {
             { borderTopColor: colors.hairline, backgroundColor: colors.ground },
           ]}
         >
-          {session.context === 'personal' && !session.consent ? (
-            <View>
+          {!session.consent ? (
+            <View style={{ gap: spacing.sm }}>
               <OrbitText variant="caption">
-                To reply, your saved memories, reviewed voice and personal-chat turns go to your
-                configured reasoning provider. Gmail lookup results stay separate.
+                Your saved memories, reviewed writing style and recent chat go to ORBIT’s reasoning
+                provider.{' '}
+                {accountContextAvailable
+                  ? 'Connected summaries are optional.'
+                  : 'Account-aware chat is not available yet.'}{' '}
+                Clear the chat to change this choice.
               </OrbitText>
+              <Pressable
+                accessibilityRole="checkbox"
+                accessibilityLabel="Include synced mail and calendar summaries"
+                accessibilityState={{
+                  checked: session.includeConnected,
+                  disabled: !accountContextAvailable,
+                }}
+                disabled={!accountContextAvailable}
+                onPress={() =>
+                  useChatSession.setState({ includeConnected: !session.includeConnected })
+                }
+                style={styles.target}
+              >
+                <OrbitText variant="label">
+                  {session.includeConnected ? '☑' : '☐'} Include my synced mail & calendar summaries
+                </OrbitText>
+              </Pressable>
               <Button
-                label="Allow my context for this chat"
+                label="Allow reviewed context for this chat"
                 kind="quiet"
                 onPress={() => useChatSession.setState({ consent: true })}
               />
             </View>
-          ) : null}
-          {session.context === 'accounts' ? (
-            <OrbitText variant="caption">
-              Read-only source lookup. Gmail content is not sent to the reasoning provider from this
-              mode. Email sending is not enabled.
-            </OrbitText>
           ) : null}
           {session.error ? <ErrorText message={session.error} /> : null}
           <View
@@ -251,27 +274,16 @@ export const AgentChat = (): ReactNode => {
               accessibilityRole="button"
               accessibilityLabel="Send to my agent"
               accessibilityState={{
-                disabled:
-                  session.busy ||
-                  session.draft.trim().length < 3 ||
-                  (session.context === 'personal' && !session.consent),
+                disabled: session.busy || session.draft.trim().length < 3 || !session.consent,
               }}
-              disabled={
-                session.busy ||
-                session.draft.trim().length < 3 ||
-                (session.context === 'personal' && !session.consent)
-              }
+              disabled={session.busy || session.draft.trim().length < 3 || !session.consent}
               onPress={() => void send()}
               style={[
                 styles.send,
                 {
                   backgroundColor: colors.ink,
                   opacity:
-                    session.busy ||
-                    session.draft.trim().length < 3 ||
-                    (session.context === 'personal' && !session.consent)
-                      ? 0.35
-                      : 1,
+                    session.busy || session.draft.trim().length < 3 || !session.consent ? 0.35 : 1,
                 },
               ]}
             >
@@ -311,7 +323,6 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  contexts: { flexDirection: 'row', gap: spacing.sm, paddingVertical: spacing.sm },
   messages: { gap: spacing.md, paddingVertical: spacing.lg },
   welcome: { gap: spacing.md, paddingTop: spacing.xl },
   suggestion: { minHeight: 44, justifyContent: 'center', alignSelf: 'flex-start' },

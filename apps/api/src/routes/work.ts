@@ -5,6 +5,7 @@ import {
   GroupVisibility,
   GroupRole,
   InboxTriage,
+  SourceDocumentKind,
   Prisma,
   RunStatus,
   type ScreeningAction,
@@ -33,6 +34,7 @@ import { requireAuth } from '../auth.js';
 import { ApiError, parseWith } from '../errors.js';
 import type { Services } from '../services.js';
 import { asArray, asRecord, iso, logActivity } from './helpers.js';
+import { activeAccountSources, lockAccountData } from '../linked-accounts.js';
 
 const idParamsSchema = z.object({ id: z.string().min(8) });
 
@@ -260,15 +262,47 @@ export const registerWorkRoutes = (app: FastifyInstance, services: Services): vo
       throw new ApiError(404, 'INBOX_ITEM_NOT_FOUND', 'That inbox item is unavailable.');
     const approvedAt = new Date();
     await services.db.$transaction(async (tx) => {
+      const mailPrefix = current.kind.startsWith('gmail:')
+        ? 'gmail:'
+        : current.kind.startsWith('outlook:')
+          ? 'outlook:'
+          : null;
+      if (mailPrefix) {
+        await lockAccountData(tx, auth.id);
+        const source = await tx.sourceDocument.findFirst({
+          where: {
+            ...activeAccountSources(auth.id),
+            kind:
+              mailPrefix === 'gmail:'
+                ? SourceDocumentKind.GMAIL_MESSAGE
+                : SourceDocumentKind.OUTLOOK_MESSAGE,
+            externalId: current.kind.slice(mailPrefix.length),
+          },
+        });
+        if (!source || current.senderUserId !== null)
+          throw new ApiError(404, 'INBOX_ITEM_NOT_FOUND', 'That mailbox source is unavailable.');
+      }
       if (current.senderUserId !== null) {
         await lockSafetyPair(tx, auth.id, current.senderUserId);
         if (await isPairBlocked(tx, auth.id, current.senderUserId))
           throw new ApiError(404, 'INBOX_ITEM_NOT_FOUND', 'That inbox item is unavailable.');
       }
-      await tx.inboxItem.update({
-        where: { id: current.id },
+      const saved = await tx.inboxItem.updateMany({
+        where: {
+          id: current.id,
+          recipientUserId: auth.id,
+          deletedAt: null,
+          approvedAt: null,
+          declinedAt: null,
+        },
         data: { agentReply: body.editedReply, approvedAt, triage: InboxTriage.HELD },
       });
+      if (saved.count !== 1)
+        throw new ApiError(
+          409,
+          'INBOX_ALREADY_REVIEWED',
+          'This draft was already reviewed or is unavailable.',
+        );
       await logActivity(tx, {
         userId: auth.id,
         actorType: 'USER',

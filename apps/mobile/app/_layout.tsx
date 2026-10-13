@@ -28,6 +28,8 @@ import { clearSocialOfflineCache } from '@/offline';
 import { subscribeSafetyUpdates } from '@/safety-updates';
 import { MainNavigation } from '@/navigation';
 import { GoogleSyncObserver } from '@/google-sync';
+import { CalendarReminderObserver } from '@/calendar-reminders';
+import { MicrosoftSyncObserver, AccountContextObserver } from '@/linked-accounts';
 
 void SplashScreen.preventAutoHideAsync();
 
@@ -95,6 +97,9 @@ function RootLayout(): ReactNode {
   return (
     <QueryClientProvider client={queryClient}>
       {accessToken !== null ? <GoogleSyncObserver /> : null}
+      {accessToken !== null ? <MicrosoftSyncObserver /> : null}
+      {accessToken !== null ? <AccountContextObserver /> : null}
+      {accessToken !== null ? <CalendarReminderObserver /> : null}
       <View style={styles.flex}>
         <StatusBar style={dark ? 'light' : 'dark'} />
         {!reachable ? (

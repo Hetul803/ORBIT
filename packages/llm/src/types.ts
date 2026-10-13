@@ -27,6 +27,7 @@ export interface LlmTool {
 
 export interface LlmConstraints {
   readonly maxOutputTokens: number;
+  readonly privateAccountContext?: boolean;
   readonly temperature: number;
   readonly jsonMode?: boolean;
   readonly stop?: readonly string[];

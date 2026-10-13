@@ -25,13 +25,20 @@ describe.runIf(enabled)('durable Google sync, synthetic sources only', () => {
   let db: PrismaClient;
   let app: FastifyInstance;
   let services: Services;
+  const owners: string[] = [];
   beforeAll(async () => {
     db = createPrismaClient();
     app = await buildApp(db, config);
     await app.ready();
     services = createServices(db, config);
   });
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await db.connection.updateMany({
+      where: { userId: { in: owners }, provider: 'GOOGLE' },
+      data: { syncStatus: 'idle', syncLeaseUntil: null, syncLeaseToken: null },
+    });
+  });
   afterAll(async () => {
     await app.close();
     await db.$disconnect();
@@ -56,6 +63,7 @@ describe.runIf(enabled)('durable Google sync, synthetic sources only', () => {
         ),
       },
     });
+    owners.push(user.id);
     return { user, c, token: (await issueTokens(db, config, user)).accessToken };
   };
   const json = (data: unknown, status = 200) =>
@@ -233,14 +241,23 @@ describe.runIf(enabled)('durable Google sync, synthetic sources only', () => {
     const state = new URL(
       started.json<{ authorizationUrl: string }>().authorizationUrl,
     ).searchParams.get('state');
-    const consent = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      json({
-        refresh_token: 'fixture-refresh-after-consent',
-        access_token: 'fixture-access-after-consent',
-        scope:
-          'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/calendar.readonly',
-        expires_in: 3600,
-      }),
+    const consent = vi.spyOn(globalThis, 'fetch').mockImplementation((input) =>
+      Promise.resolve(
+        (typeof input === 'string'
+          ? input
+          : input instanceof URL
+            ? input.href
+            : input.url
+        ).endsWith('/profile')
+          ? json({ emailAddress: o.user.email })
+          : json({
+              refresh_token: 'fixture-refresh-after-consent',
+              access_token: 'fixture-access-after-consent',
+              scope:
+                'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/calendar.readonly',
+              expires_in: 3600,
+            }),
+      ),
     );
     const callback = await app.inject({
       method: 'GET',

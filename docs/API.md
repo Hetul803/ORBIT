@@ -58,3 +58,11 @@ Every request gets a server-generated UUID, returned as `x-request-id`. Logs use
 ## Realtime
 
 Connect to `/v1/stream?access_token=<token>` or pass the bearer header. Events are advisory invalidations; the client should refetch the authoritative resource after an introduction decision or run update.
+
+## October 13 local account-aware API additions — not yet deployed
+
+The [day-one sprint inventory](DAY_ONE_AGENT_20261013.md) documents the exact routes and ownership checks. Local source adds Microsoft `/v1/connections/outlook/{status,start,callback,sync}` and account-specific DELETE, per-account Google management, protected `/v1/mail` action/account filters and `/v1/mail/:id/draft`, `/v1/agenda` account filtering, and optional account-attributed `/v1/agent/chat` context. `GET /v1/agent` exposes `connectedContextAvailable`; mail lists expose `draftingAvailable`.
+
+`ACCOUNT_MODEL_CONTEXT_ENABLED=false` by default outside synthetic tests. Connected-model chat/drafting requires deliberate operator enablement after the matching privacy disclosures and provider controls are reviewed. It also requires separate in-product user consent; OAuth read consent alone is not permission to forward original email text for drafting. Google/Microsoft sources, tokens, IDs and threads remain separately bound to provider/account/owner. Reviewed drafts remain `sent:false` with no mail-send scope or adapter.
+
+Migration 18 replaces connection uniqueness and migration 19 introduces Microsoft source kinds/account-boundary triggers and changes the source foreign key to cascade on connection deletion. Do not treat this as an old/new-backend-safe additive rolling migration. Production is still the prior API on migration 17; the local inventory is not evidence that these new routes are live there.

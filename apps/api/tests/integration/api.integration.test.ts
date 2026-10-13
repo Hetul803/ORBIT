@@ -335,7 +335,7 @@ describe.runIf(enabled)('ORBIT API integration', () => {
       expect(prompt).toContain('Quiet mornings');
       expect(prompt).toContain('Coffee Saturday?');
       expect(prompt).not.toContain('Forgotten fact');
-      expect(completion.mock.calls[0]?.[0].constraints.maxOutputTokens).toBe(450);
+      expect(completion.mock.calls[0]?.[0].constraints.maxOutputTokens).toBe(650);
     } finally {
       completion.mockRestore();
     }
